@@ -1,0 +1,14 @@
+# Brazuca RD Addon Environment Configuration
+# Copy this file to .envrc and customize for your environment
+
+# Server Configuration
+export PORT=7000
+export LOG_LEVEL=info
+
+# Base URL for production deployment
+# Leave empty for development (will use localhost)
+# export BASE_URL=https://your-domain.com
+
+# Development
+# Uncomment for local development
+# export BASE_URL=http://localhost:7000

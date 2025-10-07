@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  brazuca-rd:
+    build: .
+    ports:
+      - "7000:7000"
+    environment:
+      - PORT=7000
+      - LOG_LEVEL=info
+      - BASE_URL=http://localhost:7000
+    volumes:
+      - ./public:/app/public:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:7000/manifest.json', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

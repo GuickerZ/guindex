@@ -1,0 +1,34 @@
+{
+  "name": "stremio-brazuca-rd",
+  "version": "1.0.0",
+  "description": "Stremio addon that proxies Brazuca Torrents magnets through Real-Debrid into direct HTTP streams. Credits to Brazuca Torrents addon author.",
+  "main": "index.js",
+  "scripts": {
+    "dev": "nodemon --exec \"npx ts-node --project tsconfig.dev.json --esm src/server.ts\" --watch src --ext ts,js",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@fastify/cors": "^8.5.0",
+    "@fastify/static": "^6.12.0",
+    "dotenv": "^17.2.2",
+    "fastify": "^4.29.1",
+    "pino": "^9.11.0",
+    "stremio-addon-sdk": "^1.6.10",
+    "undici": "^5.29.0",
+    "zod": "^4.1.11"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.11",
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "@typescript-eslint/parser": "^6.21.0",
+    "eslint": "^8.57.1",
+    "nodemon": "^3.1.10",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.2"
+  }
+}

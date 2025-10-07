@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: brazuca-rd
+    env: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    envVars:
+      - key: BASE_URL
+        sync: false
+      - key: PORT
+        value: 7000
+      - key: LOG_LEVEL
+        value: info
+      - key: NODE_ENV
+        value: production
+    healthCheckPath: /manifest.json
