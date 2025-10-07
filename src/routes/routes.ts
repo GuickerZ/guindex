@@ -44,16 +44,22 @@ export function setupRoutes() {
    * ✅ Suporte a tokens do Real-Debrid no caminho
    * Exemplo: /TOKEN/manifest.json
    */
-  fastify.all('/:token?/manifest.json', async (req, reply) => {
-    const { token } = req.params as { token?: string };
+   fastify.all('/manifest.json', async (req, reply) => {
+    const query = req.query as any;
+    const token = StreamService.extractRealDebridToken(query, req.headers);
+
+    const manifest = configController.createAddonManifest(!!token);
+    reply.send(manifest);
+  });
+
+  // Caso com token no caminho
+  fastify.all('/:token/manifest.json', async (req, reply) => {
+    const { token } = req.params as { token: string };
     const query = req.query as any;
 
-    // Tenta extrair token do caminho, query string ou headers
-    const extractedToken = token && token.length > 20 
-      ? token 
-      : StreamService.extractRealDebridToken(query, req.headers);
-
-    const manifest = configController.createAddonManifest(!!extractedToken);
+    // Valida token (precisa ter um tamanho mínimo, igual aos tokens do Real-Debrid)
+    const validToken = token && token.length > 20 ? token : undefined;
+    const manifest = configController.createAddonManifest(!!validToken);
     reply.send(manifest);
   });
 
