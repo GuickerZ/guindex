@@ -74,26 +74,41 @@ export function setupRoutes() {
     reply.type('text/html').send(configController.generateConfigHTML());
   });
 
-  fastify.all('/stream/:type/:id.json', async (req, reply) => {
-    const { type, id } = req.params as any;
-    const query = req.query as any;
-    const token = StreamService.extractRealDebridToken(query, req.headers);
-    
-    try {
-      const extra: { realdebridToken?: string } = {};
-      if (token) extra.realdebridToken = token;
-      
-      const result = await streamController.handleStreamRequest({ 
-        type, 
-        id, 
-        extra 
-      });
-      reply.send(result);
-    } catch (error) {
-      logger.error(`Stream endpoint error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      reply.send({ streams: [] });
-    }
-  });
+  // ✅ Caso sem token
+fastify.all('/stream/:type/:id.json', async (req, reply) => {
+  const { type, id } = req.params as any;
+  const query = req.query as any;
+  const token = StreamService.extractRealDebridToken(query, req.headers);
+
+  try {
+    const extra: { realdebridToken?: string } = {};
+    if (token) extra.realdebridToken = token;
+
+    const result = await streamController.handleStreamRequest({ type, id, extra });
+    reply.send(result);
+  } catch (error) {
+    logger.error(`Stream endpoint error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    reply.send({ streams: [] });
+  }
+});
+
+// ✅ Caso com token no caminho
+fastify.all('/:token/stream/:type/:id.json', async (req, reply) => {
+  const { token, type, id } = req.params as any;
+  const query = req.query as any;
+  const realToken = StreamService.extractRealDebridToken(query, req.headers, {}, { token });
+
+  try {
+    const extra: { realdebridToken?: string } = {};
+    if (realToken) extra.realdebridToken = realToken;
+
+    const result = await streamController.handleStreamRequest({ type, id, extra });
+    reply.send(result);
+  } catch (error) {
+    logger.error(`Stream endpoint error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    reply.send({ streams: [] });
+  }
+});
 
   fastify.get('/resolve/:token/:magnet', async (req, reply) => {
     const { token, magnet } = req.params as { token: string; magnet: string };

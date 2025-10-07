@@ -25,12 +25,24 @@ export class StreamService {
     return metadata;
   }
 
-  static extractRealDebridToken(query: any, headers: any, extra?: { realdebridToken?: string; token?: string }): string | undefined {
-    return query.realdebridToken || 
-           query.rdToken || 
-           query.token || 
-           headers['x-rd-token'] || 
-           extra?.realdebridToken || 
-           extra?.token;
-  }
+  static extractRealDebridToken(
+  query: any,
+  headers: any,
+  extra?: { realdebridToken?: string; token?: string },
+  params?: { token?: string }
+): string | undefined {
+  const token =
+    query.realdebridToken ||
+    query.rdToken ||
+    query.token ||
+    headers['x-rd-token'] ||
+    extra?.realdebridToken ||
+    extra?.token ||
+    params?.token;
+
+  // Valida token com tamanho típico do Real-Debrid
+  if (token && token.length > 20) return token;
+  return undefined;
+}
+
 }
