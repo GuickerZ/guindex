@@ -8,12 +8,12 @@ services:
     environment:
       - PORT=7000
       - LOG_LEVEL=info
-      - BASE_URL=http://localhost:7000
+      - BASE_URL=https://brazuca-rd.vercel.app/
     volumes:
       - ./public:/app/public:ro
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:7000/manifest.json', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"]
+      test: ["CMD", "node", "-e", "require('http').get('https://brazuca-rd.vercel.app/manifest.json', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"]
       interval: 30s
       timeout: 10s
       retries: 3
