@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "nodemon --exec \"npx ts-node --project tsconfig.dev.json --esm src/server.ts\" --watch src --ext ts,js",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/server.js"
+    "start": "node dist/index.js"
   },
   "keywords": [],
   "author": "",
