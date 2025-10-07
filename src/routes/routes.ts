@@ -40,12 +40,20 @@ export function setupRoutes() {
     return streamController.handleStreamRequest(args);
   });
 
-  // Routes
-  fastify.all('/manifest.json', async (req, reply) => {
+  /**
+   * ✅ Suporte a tokens do Real-Debrid no caminho
+   * Exemplo: /TOKEN/manifest.json
+   */
+  fastify.all('/:token?/manifest.json', async (req, reply) => {
+    const { token } = req.params as { token?: string };
     const query = req.query as any;
-    const token = StreamService.extractRealDebridToken(query, req.headers);
-    
-    const manifest = configController.createAddonManifest(!!token);
+
+    // Tenta extrair token do caminho, query string ou headers
+    const extractedToken = token && token.length > 20 
+      ? token 
+      : StreamService.extractRealDebridToken(query, req.headers);
+
+    const manifest = configController.createAddonManifest(!!extractedToken);
     reply.send(manifest);
   });
 
@@ -81,7 +89,6 @@ export function setupRoutes() {
     }
   });
 
-  // Resolve endpoint - processes magnet links through Real-Debrid when user plays the stream
   fastify.get('/resolve/:token/:magnet', async (req, reply) => {
     const { token, magnet } = req.params as { token: string; magnet: string };
     
@@ -98,8 +105,6 @@ export function setupRoutes() {
     try {
       const decodedMagnet = decodeURIComponent(magnet);
       const directUrl = await streamController.processMagnetForPlayback(decodedMagnet, token);
-      
-      // Redirect to the direct download URL
       reply.redirect(directUrl);
     } catch (error) {
       logger.error(`Magnet processing error: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -107,15 +112,11 @@ export function setupRoutes() {
     }
   });
 
-  // Placeholder video endpoint - serves downloading status video
-  // The static file plugin will automatically serve files from public/ directory
-  // This route is optional but can be used for custom headers or logging
   fastify.get('/placeholder/downloading.mp4', async (req, reply) => {
     reply.type('video/mp4');
     reply.sendFile('downloading.mp4');
   });
 
-  // Debug endpoint to check environment variables
   fastify.get('/debug', async (req, reply) => {
     reply.send({
       environment: {
