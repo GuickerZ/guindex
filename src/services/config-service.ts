@@ -8,7 +8,7 @@ export class ConfigService {
   static loadConfig(): AppConfig {
     const port = Number(process.env.PORT || 7000);
     const logLevel = (process.env.LOG_LEVEL as AppConfig['logLevel']) || 'info';
-    const baseUrl = process.env.BASE_URL || `http://localhost:${port}`;
+    const baseUrl = process.env.BASE_URL || `https://brazuca-rd.vercel.app`;
 
     // Debug logging for environment variables
     console.log('Environment variables:');
