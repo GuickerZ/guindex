@@ -353,9 +353,11 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       const nameLines = stream.name.split('\n');
       const firstLine = nameLines[0] ?? '';
       if (!/RD\+/i.test(firstLine)) {
-        const cleaned = firstLine.replace(/\s+RD\+?$/i, '').trim();
-        const baseLine = cleaned || firstLine.trim();
-        nameLines[0] = `${baseLine} RD+`.trim();
+        if (/\bRD\b/i.test(firstLine)) {
+          nameLines[0] = firstLine.replace(/\bRD\b/gi, 'RD+');
+        } else {
+          nameLines[0] = `${firstLine} RD+`.trim();
+        }
       }
       stream.name = nameLines.join('\n');
     }
@@ -363,7 +365,9 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     if (typeof stream.title === 'string' && stream.title.length > 0) {
       const titleLines = stream.title.split('\n');
       const firstLine = titleLines[0] ?? '';
-      if (!/RD\+/i.test(firstLine)) {
+      if (/\[RD\]/i.test(firstLine)) {
+        titleLines[0] = firstLine.replace(/\[RD\]/gi, '[RD+]');
+      } else if (!/RD\+/i.test(firstLine)) {
         titleLines[0] = `${firstLine} [RD+]`.trim();
       }
       if (!titleLines.some((line) => /Real-?Debrid/i.test(line))) {
@@ -483,7 +487,6 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       return `${targetTitle} ${episodeTitle}`;
     }
 
-    console.log(targetTitle)
     return targetTitle;
   }
 
@@ -859,7 +862,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     const audioLine = this.formatAudioLine(torrent);
 
     const headline = quality ? `${displayTitle} [${quality}]` : displayTitle;
-    const titleLines = [headline];
+    const titleLines = [`${headline} [RD]`];
     if (infoSegments.some((segment) => segment.trim().length > 0)) {
       titleLines.push(infoSegments.join(' '));
     }
@@ -872,9 +875,13 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     }
 
     const qualityLabel = quality ?? 'RD';
+    const nameLines = [`[${sourceLabel}] RD Brazuca`];
+    if (qualityLabel) {
+      nameLines.push(qualityLabel);
+    }
 
     const stream: SourceStream = {
-      name: `[${sourceLabel}] Brazuca RD\n${qualityLabel}`,
+      name: nameLines.join('\n'),
       title: titleLines.join('\n'),
       magnet,
     };
