@@ -228,37 +228,34 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
   private async decorateWithRealDebrid(streams: SourceStream[]): Promise<void> {
     const hashToStreams = new Map<string, SourceStream[]>();
-
+  
     for (const stream of streams) {
       const hash = this.getStreamInfoHash(stream);
       if (!hash) {
         continue;
       }
-
+  
       const normalized = hash.toLowerCase();
       if (!hashToStreams.has(normalized)) {
         hashToStreams.set(normalized, []);
       }
       hashToStreams.get(normalized)!.push(stream);
     }
-
+  
     if (hashToStreams.size === 0) {
       return;
     }
-
+  
     const cachedHashes = await this.fetchCachedHashes([...hashToStreams.keys()]);
     if (cachedHashes.size === 0) {
       return;
     }
-
-    for (const hash of cachedHashes) {
-      const related = hashToStreams.get(hash);
-      if (!related) {
-        continue;
-      }
-
-      for (const stream of related) {
+  
+    for (const [hash, relatedStreams] of hashToStreams.entries()) {
+      const isCached = cachedHashes.has(hash); // Check if the hash is cached
+      for (const stream of relatedStreams) {
         this.applyRealDebridBadge(stream);
+        stream.cached = isCached; // Add the `isCached` property to the stream
       }
     }
   }
@@ -883,6 +880,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       name: nameLines.join('\n'),
       title: titleLines.join('\n'),
       magnet,
+      cached: false
     };
 
     const infoHash =
