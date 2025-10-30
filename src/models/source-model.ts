@@ -1,7 +1,15 @@
 /**
  * Source Models
  */
-
+export interface StreamContext {
+  type?: string;
+  season?: number;
+  episode?: number;
+  episodeTitle?: string;
+  title?: string;
+  year?: number;
+  episodeList?: number[];
+}
 export interface SourceStream {
   name?: string;
   title?: string;
@@ -12,4 +20,5 @@ export interface SourceStream {
   seeders?: number;
   quality?: string;
   releaseGroup?: string;
+  context?: StreamContext;
 }
