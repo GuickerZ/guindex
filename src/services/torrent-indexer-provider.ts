@@ -278,12 +278,15 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     const doRequest = async (endpoint: string) => {
       try {
         const response = await request(endpoint, { headers });
+        console.log(response)
         const status = response.statusCode ?? 0;
         // Se o RD retornar 404 ou 204 ou 400, consideramos tentativa falhada (vai cair no fallback per-hash)
         if (status >= 400) {
           // tenta ler body por precaução (algumas implementações retornam JSON mesmo com 404)
           try {
             const maybe = await response.body.json();
+            console.log(maybe)
+
             if (maybe && typeof maybe === 'object' && Object.keys(maybe).length > 0) {
               return maybe as Record<string, unknown>;
             }
