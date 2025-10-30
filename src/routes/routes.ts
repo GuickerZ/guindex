@@ -1,4 +1,28 @@
- // Register CORS plugin
+
+/**
+ * Routes
+ */
+
+import Fastify from 'fastify';
+import pino from 'pino';
+import path from 'path';
+import stremioAddonSdk from 'stremio-addon-sdk';
+import { ConfigController } from '../controllers/config-controller.js';
+import { StreamController } from '../controllers/stream-controller.js';
+import { ConfigService } from '../services/config-service.js';
+import { StreamService } from '../services/stream-service.js';
+import type { StreamRequest } from '../models/stream-model.js';
+
+const { addonBuilder, getRouter } = stremioAddonSdk;
+
+export function setupRoutes() {
+  const config = ConfigService.loadConfig();
+  const logger = pino({ level: config.logLevel });
+  const fastify = Fastify({ logger });
+
+  // Register CORS plugin
+
+// Register CORS plugin
   fastify.register(import('@fastify/cors'), {
     origin: true,
     credentials: true
