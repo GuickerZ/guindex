@@ -3,6 +3,7 @@
  */
 
 import type { StreamRequest, StreamResponse } from '../models/stream-model.js';
+import type { StreamContext } from '../models/source-model.js';
 import { RealDebridService } from '../services/realdebrid-service.js';
 import { SourceService } from '../services/source-service.js';
 import { StreamService } from '../services/stream-service.js';
@@ -28,8 +29,7 @@ export class StreamController {
       );
       
       if (processableStreams.length === 0) {
-        console.debug('No processable streams found');
-        return { streams: [] };
+@@ -33,62 +34,64 @@ export class StreamController {
       }
 
       console.debug(`Found ${processableStreams.length} streams with magnet links`);
@@ -55,8 +55,10 @@ export class StreamController {
         }
         
         // Use configured base URL
-        const apiUrl = `${this.config.baseUrl}/resolve/${token}/${encodedMagnet}`;
-        
+        const contextValue = StreamService.encodeStreamContext(stream.context);
+        const querySuffix = contextValue ? `?ctx=${contextValue}` : '';
+        const apiUrl = `${this.config.baseUrl}/resolve/${token}/${encodedMagnet}${querySuffix}`;
+
         return StreamService.createStreamMetadata(stream, apiUrl);
       });
 
@@ -72,7 +74,7 @@ export class StreamController {
   /**
    * Processes a magnet link through Real-Debrid when user actually plays the stream
    */
-  async processMagnetForPlayback(magnet: string, token: string): Promise<string> {
+  async processMagnetForPlayback(magnet: string, token: string, context?: StreamContext): Promise<string> {
     if (!token) {
       throw new Error('Real-Debrid token is required for playback');
     }
@@ -81,7 +83,7 @@ export class StreamController {
       console.debug(`Processing magnet for playback: ${magnet.substring(0, 50)}...`);
       
       const rdService = new RealDebridService(token);
-      const directUrl = await rdService.processMagnetToDirectUrl(magnet);
+      const directUrl = await rdService.processMagnetToDirectUrl(magnet, context);
       
       console.debug(`Successfully processed magnet for playback: ${directUrl}`);
       return directUrl;
