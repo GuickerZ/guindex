@@ -111,7 +111,7 @@ fastify.all('/:token/stream/:type/:id.json', async (req, reply) => {
 });
 
   fastify.get('/resolve/:token/:magnet', async (req, reply) => {
-    const { token, magnet } = req.params as { token: string; magnet: string };
+    const { ctx } = req.query as { ctx?: string };
     
     if (!magnet) {
       reply.status(400).send({ error: 'Magnet link is required' });
