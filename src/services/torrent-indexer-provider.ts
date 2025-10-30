@@ -248,52 +248,79 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
   
     const cachedHashes = await this.fetchCachedHashes([...hashToStreams.keys()]);
     if (cachedHashes.size === 0) {
+      // ainda marque explicitamente como não cached para quem confiar nessa flag
+      for (const streamsGroup of hashToStreams.values()) {
+        for (const s of streamsGroup) {
+          s.cached = false;
+        }
+      }
       return;
     }
   
     for (const [hash, relatedStreams] of hashToStreams.entries()) {
-      const isCached = cachedHashes.has(hash); // Check if the hash is cached
+      const isCached = cachedHashes.has(hash);
       for (const stream of relatedStreams) {
-        this.applyRealDebridBadge(stream);
-        stream.cached = isCached; // Add the `isCached` property to the stream
+        stream.cached = isCached;
+        if (isCached) {
+          this.applyRealDebridBadge(stream);
+        }
       }
     }
   }
-
   private async fetchCachedHashes(hashes: string[]): Promise<Set<string>> {
     const cached = new Set<string>();
     const chunkSize = 50;
-
+  
+    const tryRequest = async (endpoint: string) => {
+      try {
+        const response = await request(endpoint);
+        if (response.statusCode >= 400) {
+          return undefined;
+        }
+        const payload = (await response.body.json()) as Record<string, unknown> | undefined;
+        return payload;
+      } catch {
+        return undefined;
+      }
+    };
+  
     for (let index = 0; index < hashes.length; index += chunkSize) {
       const chunk = hashes.slice(index, index + chunkSize);
       if (chunk.length === 0) {
         continue;
       }
-
-      const requestHashes = chunk.map((hash) => hash.toUpperCase());
-      const endpoint = `https://api.real-debrid.com/rest/1.0/torrents/instantAvailability/${requestHashes.join('/')}`;
-
-      try {
-        const response = await request(endpoint);
-        if (response.statusCode >= 400) {
-          continue;
+  
+      // alguns clients/implementações aceitam /-separated, outros ,-separated — tenta ambos e agrega
+      const upperHashes = chunk.map((h) => h.toUpperCase());
+      const endpoints = [
+        `https://api.real-debrid.com/rest/1.0/torrents/instantAvailability/${upperHashes.join('/')}`,
+        `https://api.real-debrid.com/rest/1.0/torrents/instantAvailability/${upperHashes.join(',')}`
+      ];
+  
+      let payload: Record<string, unknown> | undefined;
+      for (const endpoint of endpoints) {
+        payload = await tryRequest(endpoint);
+        if (payload && typeof payload === 'object' && Object.keys(payload).length > 0) {
+          break;
         }
-
-        const payload = (await response.body.json()) as Record<string, unknown> | undefined;
-        if (!payload || typeof payload !== 'object') {
-          continue;
-        }
-
-        for (const [key, value] of Object.entries(payload)) {
+        // se payload for um objeto vazio ou undefined, continua para o próximo formato
+      }
+  
+      if (!payload || typeof payload !== 'object') {
+        continue;
+      }
+  
+      for (const [key, value] of Object.entries(payload)) {
+        try {
           if (this.isInstantAvailabilityCached(value)) {
             cached.add(key.toLowerCase());
           }
+        } catch {
+          // ignora erros de parsing por segurança
         }
-      } catch {
-        // Ignore Real-Debrid availability errors
       }
     }
-
+  
     return cached;
   }
 
@@ -809,144 +836,144 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     return undefined;
   }
 
-  private mapTorrentToStream(
-    torrent: TorrentLike,
-    fallbackTitle: string,
-    context: MatchContext
-  ): SourceStream | undefined {
-    if (!torrent || typeof torrent !== 'object') {
-      return undefined;
-    }
-
-    const magnet = this.extractMagnet(torrent);
-    if (!magnet) {
-      return undefined;
-    }
-
-    const baseTitle = this.extractTitle(torrent) || fallbackTitle || `${this.name} Torrent`;
-    const displayTitle = this.buildDisplayTitle(torrent, baseTitle);
-    const detailUrl = this.extractDetailUrl(torrent);
-
-    const sourceLabel =
-      this.extractSourceDomain(torrent) ||
-      this.extractIndexerName(torrent) ||
-      this.titleize(this.name);
-
-    const size = this.extractSize(torrent);
-    const releaseYear = this.extractYear(torrent);
-    const rawQuality =
-      (torrent as Record<string, unknown>).quality ||
-      (torrent as Record<string, unknown>).resolution ||
-      this.inferQualityFromTitle(baseTitle);
-    const quality = this.normalizeQuality(rawQuality);
-    const releaseGroup =
-      (torrent as Record<string, unknown>).releaseGroup ||
-      (torrent as Record<string, unknown>).group ||
-      (torrent as Record<string, unknown>).uploader ||
-      (torrent as Record<string, unknown>).source;
-
-    const seeds = this.extractSeeders(torrent);
-    const seedCount = seeds !== undefined ? Math.max(0, Math.floor(seeds)) : 0;
-
-    const infoSegments: string[] = [`👤 ${seedCount}`];
-    if (size !== undefined && size > 0) {
-      infoSegments.push(`💾 ${this.formatSize(size)}`);
-    }
-      infoSegments.push(`⚙️ [${sourceLabel}]`);
-  
-
-    const audioLine = this.formatAudioLine(torrent);
-
-    const headline = quality ? `${displayTitle} [${quality}]` : displayTitle;
-    const titleLines = [`${headline} [RD]`];
-    if (infoSegments.some((segment) => segment.trim().length > 0)) {
-      titleLines.push(infoSegments.join(' '));
-    }
-    if (audioLine) {
-      titleLines.push(audioLine);
-    }
-
-    if (detailUrl) {
-      titleLines.push(`📡 ${detailUrl}`);
-    }
-
-    const qualityLabel = quality ?? 'RD';
-    const nameLines = [`[${sourceLabel}] RD Brazuca`];
-    if (qualityLabel) {
-      nameLines.push(qualityLabel);
-    }
-
-    const stream: SourceStream = {
-      name: nameLines.join('\n'),
-      title: titleLines.join('\n'),
-      magnet,
-      cached: false
-    };
-
-    const infoHash =
-      (torrent as Record<string, unknown>).infoHash ||
-      (torrent as Record<string, unknown>).hash ||
-      (torrent as Record<string, unknown>).btih ||
-      this.extractInfoHash(magnet);
-
-    if (typeof infoHash === 'string' && infoHash) {
-      stream.infoHash = infoHash;
-    }
-
-    if (size !== undefined) {
-      stream.size = size;
-    }
-
-    if (seeds !== undefined) {
-      stream.seeders = seeds;
-    }
-
-    if (quality) {
-      stream.quality = quality;
-    }
-
-    if (typeof releaseGroup === 'string' && releaseGroup.trim()) {
-      stream.releaseGroup = releaseGroup.trim();
-    }
-
-    const episodeList = this.extractEpisodeList(torrent);
-    const streamContext: StreamContext = {};
-
-    if (context.type) {
-      streamContext.type = context.type;
-    }
-
-    if (context.parsed.season !== undefined) {
-      streamContext.season = context.parsed.season;
-    }
-
-    if (context.parsed.episode !== undefined) {
-      streamContext.episode = context.parsed.episode;
-    }
-
-    if (context.episodeTitle) {
-      streamContext.episodeTitle = context.episodeTitle;
-    }
-
-    if (displayTitle) {
-      streamContext.title = displayTitle;
-    }
-
-    const combinedYear = releaseYear ?? context.releaseYear;
-    if (combinedYear !== undefined) {
-      streamContext.year = combinedYear;
-    }
-
-    if (episodeList && episodeList.length > 0) {
-      streamContext.episodeList = episodeList;
-    }
-
-    if (Object.keys(streamContext).length > 0) {
-      stream.context = streamContext;
-    }
-
-    return stream;
+private mapTorrentToStream(
+  torrent: TorrentLike,
+  fallbackTitle: string,
+  context: MatchContext
+): SourceStream | undefined {
+  if (!torrent || typeof torrent !== 'object') {
+    return undefined;
   }
+
+  const magnet = this.extractMagnet(torrent);
+  if (!magnet) {
+    return undefined;
+  }
+
+  const baseTitle = this.extractTitle(torrent) || fallbackTitle || `${this.name} Torrent`;
+  const displayTitle = this.buildDisplayTitle(torrent, baseTitle);
+  const detailUrl = this.extractDetailUrl(torrent);
+
+  const sourceLabel =
+    this.extractSourceDomain(torrent) ||
+    this.extractIndexerName(torrent) ||
+    this.titleize(this.name);
+
+  const size = this.extractSize(torrent);
+  const releaseYear = this.extractYear(torrent);
+  const rawQuality =
+    (torrent as Record<string, unknown>).quality ||
+    (torrent as Record<string, unknown>).resolution ||
+    this.inferQualityFromTitle(baseTitle);
+  const quality = this.normalizeQuality(rawQuality);
+  const releaseGroup =
+    (torrent as Record<string, unknown>).releaseGroup ||
+    (torrent as Record<string, unknown>).group ||
+    (torrent as Record<string, unknown>).uploader ||
+    (torrent as Record<string, unknown>).source;
+
+  const seeds = this.extractSeeders(torrent);
+  const seedCount = seeds !== undefined ? Math.max(0, Math.floor(seeds)) : 0;
+
+  const infoSegments: string[] = [`👤 ${seedCount}`];
+  if (size !== undefined && size > 0) {
+    infoSegments.push(`💾 ${this.formatSize(size)}`);
+  }
+  infoSegments.push(`⚙️ [${sourceLabel}]`);
+
+  const audioLine = this.formatAudioLine(torrent);
+
+  const headline = quality ? `${displayTitle} [${quality}]` : displayTitle;
+  const titleLines = [headline]; // **removido**: [RD] padrão
+  if (infoSegments.some((segment) => segment.trim().length > 0)) {
+    titleLines.push(infoSegments.join(' '));
+  }
+  if (audioLine) {
+    titleLines.push(audioLine);
+  }
+
+  if (detailUrl) {
+    titleLines.push(`📡 ${detailUrl}`);
+  }
+
+  const qualityLabel = quality ?? 'RD';
+  const nameLines = [`[${sourceLabel}]`]; // **removido**: RD Brazuca padrão
+  if (qualityLabel) {
+    nameLines.push(qualityLabel);
+  }
+
+  const stream: SourceStream = {
+    name: nameLines.join('\n'),
+    title: titleLines.join('\n'),
+    magnet,
+    cached: false
+  };
+
+  const infoHash =
+    (torrent as Record<string, unknown>).infoHash ||
+    (torrent as Record<string, unknown>).hash ||
+    (torrent as Record<string, unknown>).btih ||
+    this.extractInfoHash(magnet);
+
+  if (typeof infoHash === 'string' && infoHash) {
+    stream.infoHash = infoHash;
+  }
+
+  if (size !== undefined) {
+    stream.size = size;
+  }
+
+  if (seeds !== undefined) {
+    stream.seeders = seeds;
+  }
+
+  if (quality) {
+    stream.quality = quality;
+  }
+
+  if (typeof releaseGroup === 'string' && releaseGroup.trim()) {
+    stream.releaseGroup = releaseGroup.trim();
+  }
+
+  const episodeList = this.extractEpisodeList(torrent);
+  const streamContext: StreamContext = {};
+
+  if (context.type) {
+    streamContext.type = context.type;
+  }
+
+  if (context.parsed.season !== undefined) {
+    streamContext.season = context.parsed.season;
+  }
+
+  if (context.parsed.episode !== undefined) {
+    streamContext.episode = context.parsed.episode;
+  }
+
+  if (context.episodeTitle) {
+    streamContext.episodeTitle = context.episodeTitle;
+  }
+
+  if (displayTitle) {
+    streamContext.title = displayTitle;
+  }
+
+  const combinedYear = releaseYear ?? context.releaseYear;
+  if (combinedYear !== undefined) {
+    streamContext.year = combinedYear;
+  }
+
+  if (episodeList && episodeList.length > 0) {
+    streamContext.episodeList = episodeList;
+  }
+
+  if (Object.keys(streamContext).length > 0) {
+    stream.context = streamContext;
+  }
+
+  return stream;
+}
+
 
   private buildDisplayTitle(torrent: TorrentLike, fallbackTitle: string): string {
     let title = fallbackTitle;
