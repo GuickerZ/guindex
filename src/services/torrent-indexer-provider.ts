@@ -855,9 +855,8 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     if (size !== undefined && size > 0) {
       infoSegments.push(`💾 ${this.formatSize(size)}`);
     }
-    if (typeof releaseGroup === 'string' && releaseGroup.trim()) {
       infoSegments.push(`⚙️ [${sourceLabel}]`);
-    }
+  
 
     const audioLine = this.formatAudioLine(torrent);
 
@@ -1009,14 +1008,9 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     }
 
     const decorated = languages.map((language) => this.mapLanguageToDisplay(language));
-    const prefix =
-      languages.length === 1
-        ? 'Áudio'
-        : languages.length === 2
-          ? 'Dual Audio'
-          : 'Multi Audio';
 
-    return `${prefix} / ${decorated.join(' / ')}`;
+
+    return `${decorated.join(' / ')}`;
   }
 
   private extractAudioLanguages(torrent: TorrentLike): string[] {
