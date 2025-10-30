@@ -8,7 +8,7 @@ import type { BaseSourceProvider } from '../services/base-source-provider.js';
 
 const TORRENT_INDEXER_BASE_URL =
   process.env.TORRENT_INDEXER_URL ||
-  'https://torrent-indexer.up.railway.app';
+  'https://torrent-indexer.darklyn.org';
 
 export const SOURCES: BaseSourceProvider[] = [
   new TorrentIndexerProvider('Torrent Indexer', TORRENT_INDEXER_BASE_URL),
