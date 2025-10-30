@@ -29,7 +29,6 @@ export class StreamController {
       );
       
       if (processableStreams.length === 0) {
-@@ -33,62 +34,64 @@ export class StreamController {
       }
 
       console.debug(`Found ${processableStreams.length} streams with magnet links`);
