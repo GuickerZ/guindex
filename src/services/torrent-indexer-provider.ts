@@ -232,6 +232,8 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     for (const stream of streams) {
       const hash = this.getStreamInfoHash(stream);
       if (!hash) {
+        // garante que streams sem hash explícito fiquem non-cached
+        stream.cached = false;
         continue;
       }
   
@@ -247,36 +249,50 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     }
   
     const cachedHashes = await this.fetchCachedHashes([...hashToStreams.keys()]);
-    if (cachedHashes.size === 0) {
-      // ainda marque explicitamente como não cached para quem confiar nessa flag
-      for (const streamsGroup of hashToStreams.values()) {
-        for (const s of streamsGroup) {
-          s.cached = false;
-        }
-      }
-      return;
-    }
   
+    // garanta que todos recebam cached boolean (true/false)
     for (const [hash, relatedStreams] of hashToStreams.entries()) {
       const isCached = cachedHashes.has(hash);
-      for (const stream of relatedStreams) {
-        stream.cached = isCached;
+      for (const s of relatedStreams) {
+        s.cached = isCached;
         if (isCached) {
-          this.applyRealDebridBadge(stream);
+          this.applyRealDebridBadge(s);
         }
       }
     }
   }
+  
   private async fetchCachedHashes(hashes: string[]): Promise<Set<string>> {
     const cached = new Set<string>();
-    const chunkSize = 50;
+    if (!hashes || hashes.length === 0) {
+      return cached;
+    }
   
-    const tryRequest = async (endpoint: string) => {
+    const chunkSize = 50;
+    const token = (process.env.REALDEBRID_TOKEN || (this as any).realDebridToken) as string | undefined;
+    const headers: Record<string,string> = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+  
+    const doRequest = async (endpoint: string) => {
       try {
-        const response = await request(endpoint);
-        if (response.statusCode >= 400) {
+        const response = await request(endpoint, { headers });
+        const status = response.statusCode ?? 0;
+        // Se o RD retornar 404 ou 204 ou 400, consideramos tentativa falhada (vai cair no fallback per-hash)
+        if (status >= 400) {
+          // tenta ler body por precaução (algumas implementações retornam JSON mesmo com 404)
+          try {
+            const maybe = await response.body.json();
+            if (maybe && typeof maybe === 'object' && Object.keys(maybe).length > 0) {
+              return maybe as Record<string, unknown>;
+            }
+          } catch {
+            // ignora
+          }
           return undefined;
         }
+  
         const payload = (await response.body.json()) as Record<string, unknown> | undefined;
         return payload;
       } catch {
@@ -284,45 +300,64 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       }
     };
   
-    for (let index = 0; index < hashes.length; index += chunkSize) {
-      const chunk = hashes.slice(index, index + chunkSize);
-      if (chunk.length === 0) {
-        continue;
+    const tryPerHash = async (hashList: string[]) => {
+      for (const h of hashList) {
+        const upper = h.toUpperCase();
+        const endpoint = `https://api.real-debrid.com/rest/1.0/torrents/instantAvailability/${upper}`;
+        const payload = await doRequest(endpoint);
+        if (!payload || typeof payload !== 'object') {
+          continue;
+        }
+        for (const [key, value] of Object.entries(payload)) {
+          try {
+            if (this.isInstantAvailabilityCached(value)) {
+              cached.add(key.toLowerCase());
+            }
+          } catch {
+            // ignore parse errors
+          }
+        }
       }
+    };
   
-      // alguns clients/implementações aceitam /-separated, outros ,-separated — tenta ambos e agrega
-      const upperHashes = chunk.map((h) => h.toUpperCase());
+    for (let i = 0; i < hashes.length; i += chunkSize) {
+      const chunk = hashes.slice(i, i + chunkSize);
+      const upperChunk = chunk.map((h) => h.toUpperCase());
+  
+      // tentar formato com '/' (bulk)
       const endpoints = [
-        `https://api.real-debrid.com/rest/1.0/torrents/instantAvailability/${upperHashes.join('/')}`,
-        `https://api.real-debrid.com/rest/1.0/torrents/instantAvailability/${upperHashes.join(',')}`
+        `https://api.real-debrid.com/rest/1.0/torrents/instantAvailability/${upperChunk.join('/')}`,
+        `https://api.real-debrid.com/rest/1.0/torrents/instantAvailability/${upperChunk.join(',')}`
       ];
   
       let payload: Record<string, unknown> | undefined;
-      for (const endpoint of endpoints) {
-        payload = await tryRequest(endpoint);
+      for (const ep of endpoints) {
+        payload = await doRequest(ep);
         if (payload && typeof payload === 'object' && Object.keys(payload).length > 0) {
           break;
         }
-        // se payload for um objeto vazio ou undefined, continua para o próximo formato
       }
   
-      if (!payload || typeof payload !== 'object') {
-        continue;
-      }
-  
-      for (const [key, value] of Object.entries(payload)) {
-        try {
-          if (this.isInstantAvailabilityCached(value)) {
-            cached.add(key.toLowerCase());
+      if (payload && typeof payload === 'object' && Object.keys(payload).length > 0) {
+        for (const [key, value] of Object.entries(payload)) {
+          try {
+            if (this.isInstantAvailabilityCached(value)) {
+              cached.add(key.toLowerCase());
+            }
+          } catch {
+            // ignore
           }
-        } catch {
-          // ignora erros de parsing por segurança
         }
+        continue; // chunk processado
       }
+  
+      // fallback per-hash quando bulk falha (muitos 404)
+      await tryPerHash(chunk);
     }
   
     return cached;
   }
+  
 
   private isInstantAvailabilityCached(value: unknown): boolean {
     if (!value || typeof value !== 'object') {
@@ -373,33 +408,40 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
   }
 
   private applyRealDebridBadge(stream: SourceStream): void {
+    if (!stream) return;
+  
+    // name: adiciona "⚡ RD+" na primeira linha (substitui/remenda RD existente)
     if (typeof stream.name === 'string' && stream.name.length > 0) {
       const nameLines = stream.name.split('\n');
       const firstLine = nameLines[0] ?? '';
-      if (!/RD\+/i.test(firstLine)) {
-        if (/\bRD\b/i.test(firstLine)) {
-          nameLines[0] = firstLine.replace(/\bRD\b/gi, 'RD+');
-        } else {
-          nameLines[0] = `${firstLine} RD+`.trim();
-        }
-      }
+  
+      // remove marcas antigas
+      let cleaned = firstLine.replace(/\[RD\]/gi, '').replace(/RD\+/gi, '').replace(/\bRD\b/gi, '').trim();
+  
+      // prefixa com ⚡ RD+
+      nameLines[0] = `⚡ RD+ ${cleaned}`.trim();
+  
       stream.name = nameLines.join('\n');
     }
-
+  
+    // title: adiciona [RD+] e linha "Disponível no Real-Debrid" se necessário
     if (typeof stream.title === 'string' && stream.title.length > 0) {
       const titleLines = stream.title.split('\n');
       const firstLine = titleLines[0] ?? '';
-      if (/\[RD\]/i.test(firstLine)) {
-        titleLines[0] = firstLine.replace(/\[RD\]/gi, '[RD+]');
-      } else if (!/RD\+/i.test(firstLine)) {
+  
+      // garantir [RD+] no cabeçalho
+      if (!/\[RD\+\]/i.test(firstLine)) {
         titleLines[0] = `${firstLine} [RD+]`.trim();
       }
-      if (!titleLines.some((line) => /Real-?Debrid/i.test(line))) {
+  
+      if (!titleLines.some((line) => /Disponível no Real-?Debrid/i.test(line))) {
         titleLines.push('Disponível no Real-Debrid');
       }
+  
       stream.title = titleLines.join('\n');
     }
   }
+  
 
   private async fetchSearchResults(query: string): Promise<TorrentLike[]> {
     const url = new URL(`${this.baseUrl}/search`);
