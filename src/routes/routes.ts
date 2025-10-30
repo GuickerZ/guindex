@@ -13,7 +13,7 @@ import { ConfigService } from '../services/config-service.js';
 import { StreamService } from '../services/stream-service.js';
 import type { StreamRequest } from '../models/stream-model.js';
 
-const { addonBuilder, getRouter } = stremioAddonSdk;
+const { addonBuilder } = stremioAddonSdk;
 
 export function setupRoutes() {
   const config = ConfigService.loadConfig();
@@ -92,6 +92,7 @@ export function setupRoutes() {
     } catch (error) {
       logger.error(`Stream endpoint error: ${error instanceof Error ? error.message : 'Unknown error'}`);
       reply.send({ streams: [] });
+      return fastify;
     }
   });
 
@@ -140,12 +141,12 @@ export function setupRoutes() {
     }
   });
 
-  fastify.get('/placeholder/downloading.mp4', async (req, reply) => {
+  fastify.get('/placeholder/downloading.mp4', async (_req, reply) => {
     reply.type('video/mp4');
     reply.sendFile('downloading.mp4');
   });
 
-  fastify.get('/debug', async (req, reply) => {
+  fastify.get('/debug', async (_req, reply) => {
     reply.send({
       environment: {
         PORT: process.env.PORT,
@@ -156,4 +157,6 @@ export function setupRoutes() {
       config: ConfigService.loadConfig()
     });
   });
+
+  return fastify;
 }
