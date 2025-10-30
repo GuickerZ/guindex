@@ -856,7 +856,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       infoSegments.push(`💾 ${this.formatSize(size)}`);
     }
     if (typeof releaseGroup === 'string' && releaseGroup.trim()) {
-      infoSegments.push(`⚙️ ${releaseGroup.trim()}`);
+      infoSegments.push(`⚙️ [${sourceLabel}]`);
     }
 
     const audioLine = this.formatAudioLine(torrent);
