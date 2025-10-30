@@ -11,6 +11,7 @@ export interface StreamContext {
   episodeList?: number[];
 }
 export interface SourceStream {
+  cached: boolean;
   name?: string;
   title?: string;
   url?: string;
