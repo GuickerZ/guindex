@@ -2,7 +2,7 @@
  * Stream Service
  */
 
-import type { SourceStream } from '../models/source-model.js';
+import type { SourceStream, StreamContext } from '../models/source-model.js';
 import type { StremioStream, StreamResponse } from '../models/stream-model.js';
 
 export class StreamService {
@@ -23,6 +23,49 @@ export class StreamService {
     if (sourceStream.releaseGroup) metadata.releaseGroup = sourceStream.releaseGroup;
 
     return metadata;
+  }
+
+  static encodeStreamContext(context?: StreamContext): string | undefined {
+    if (!context) {
+      return undefined;
+    }
+
+    try {
+      const json = JSON.stringify(context);
+      if (!json) {
+        return undefined;
+      }
+
+      const buffer = Buffer.from(json, 'utf-8');
+      const base64 = buffer.toString('base64');
+      return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+    } catch {
+      return undefined;
+    }
+  }
+
+  static decodeStreamContext(encoded?: string): StreamContext | undefined {
+    if (!encoded) {
+      return undefined;
+    }
+
+    try {
+      let normalized = encoded.replace(/-/g, '+').replace(/_/g, '/');
+      while (normalized.length % 4 !== 0) {
+        normalized += '=';
+      }
+
+      const buffer = Buffer.from(normalized, 'base64');
+      const json = buffer.toString('utf-8');
+      if (!json) {
+        return undefined;
+      }
+
+      const context = JSON.parse(json) as StreamContext;
+      return context;
+    } catch {
+      return undefined;
+    }
   }
 
   static extractRealDebridToken(
