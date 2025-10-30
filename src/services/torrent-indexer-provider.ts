@@ -4,7 +4,7 @@
 
 import { request } from 'undici';
 import { BaseSourceProvider } from './base-source-provider.js';
-import type { SourceStream } from '../models/source-model.js';
+import type { SourceStream, StreamContext } from '../models/source-model.js';
 
 interface ParsedIdInfo {
   imdbId?: string;
@@ -182,7 +182,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
           continue;
         }
 
-        const stream = this.mapTorrentToStream(torrent, targetTitle ?? query);
+        const stream = this.mapTorrentToStream(torrent, targetTitle ?? query, context);
         if (!stream) {
           continue;
         }
@@ -353,7 +353,9 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       const nameLines = stream.name.split('\n');
       const firstLine = nameLines[0] ?? '';
       if (!/RD\+/i.test(firstLine)) {
-        nameLines[0] = `${firstLine} RD+`.trim();
+        const cleaned = firstLine.replace(/\s+RD\+?$/i, '').trim();
+        const baseLine = cleaned || firstLine.trim();
+        nameLines[0] = `${baseLine} RD+`.trim();
       }
       stream.name = nameLines.join('\n');
     }
@@ -481,6 +483,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       return `${targetTitle} ${episodeTitle}`;
     }
 
+    console.log(targetTitle)
     return targetTitle;
   }
 
@@ -522,6 +525,11 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       if (parsed.episode !== undefined) {
         const torrentEpisode = this.extractEpisode(torrent);
         if (torrentEpisode !== undefined && torrentEpisode !== parsed.episode) {
+          return false;
+        }
+
+        const episodeList = this.extractEpisodeList(torrent);
+        if (episodeList && episodeList.length > 0 && !episodeList.includes(parsed.episode)) {
           return false;
         }
       }
@@ -623,6 +631,60 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       record['Episode'];
 
     return this.toNumber(candidate);
+  }
+
+  private extractEpisodeList(torrent: TorrentLike): number[] | undefined {
+    const record = torrent as Record<string, unknown>;
+    const candidates = [
+      record.episodes,
+      record.episodeList,
+      record.episode_list,
+      record.episodeNumbers,
+      record.episode_numbers,
+      record.filesEpisodes,
+      record.parts,
+    ];
+
+    const numbers = new Set<number>();
+
+    const addValue = (value: unknown) => {
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        numbers.add(Math.floor(value));
+        return;
+      }
+
+      if (typeof value === 'string') {
+        const matches = value.match(/\d+/g);
+        if (matches) {
+          matches.forEach((match) => {
+            const parsed = Number(match);
+            if (!Number.isNaN(parsed)) {
+              numbers.add(parsed);
+            }
+          });
+        }
+        return;
+      }
+
+      if (Array.isArray(value)) {
+        value.forEach(addValue);
+        return;
+      }
+
+      if (value && typeof value === 'object') {
+        for (const item of Object.values(value as Record<string, unknown>)) {
+          addValue(item);
+        }
+      }
+    };
+
+    candidates.forEach(addValue);
+
+    if (numbers.size === 0) {
+      return undefined;
+    }
+
+    return Array.from(numbers).sort((a, b) => a - b);
   }
 
   private normalizeForComparison(value: string): string {
@@ -747,7 +809,11 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     return undefined;
   }
 
-  private mapTorrentToStream(torrent: TorrentLike, fallbackTitle: string): SourceStream | undefined {
+  private mapTorrentToStream(
+    torrent: TorrentLike,
+    fallbackTitle: string,
+    context: MatchContext
+  ): SourceStream | undefined {
     if (!torrent || typeof torrent !== 'object') {
       return undefined;
     }
@@ -759,6 +825,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
     const baseTitle = this.extractTitle(torrent) || fallbackTitle || `${this.name} Torrent`;
     const displayTitle = this.buildDisplayTitle(torrent, baseTitle);
+    const detailUrl = this.extractDetailUrl(torrent);
 
     const sourceLabel =
       this.extractSourceDomain(torrent) ||
@@ -766,6 +833,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       this.titleize(this.name);
 
     const size = this.extractSize(torrent);
+    const releaseYear = this.extractYear(torrent);
     const rawQuality =
       (torrent as Record<string, unknown>).quality ||
       (torrent as Record<string, unknown>).resolution ||
@@ -799,10 +867,14 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       titleLines.push(audioLine);
     }
 
-    const qualityLabel = quality ?? 'Qualidade desconhecida';
+    if (detailUrl) {
+      titleLines.push(`📡 ${detailUrl}`);
+    }
+
+    const qualityLabel = quality ?? 'RD';
 
     const stream: SourceStream = {
-      name: `[${sourceLabel}] Brazuca\n${qualityLabel}`,
+      name: `[${sourceLabel}] Brazuca RD\n${qualityLabel}`,
       title: titleLines.join('\n'),
       magnet,
     };
@@ -831,6 +903,42 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
     if (typeof releaseGroup === 'string' && releaseGroup.trim()) {
       stream.releaseGroup = releaseGroup.trim();
+    }
+
+    const episodeList = this.extractEpisodeList(torrent);
+    const streamContext: StreamContext = {};
+
+    if (context.type) {
+      streamContext.type = context.type;
+    }
+
+    if (context.parsed.season !== undefined) {
+      streamContext.season = context.parsed.season;
+    }
+
+    if (context.parsed.episode !== undefined) {
+      streamContext.episode = context.parsed.episode;
+    }
+
+    if (context.episodeTitle) {
+      streamContext.episodeTitle = context.episodeTitle;
+    }
+
+    if (displayTitle) {
+      streamContext.title = displayTitle;
+    }
+
+    const combinedYear = releaseYear ?? context.releaseYear;
+    if (combinedYear !== undefined) {
+      streamContext.year = combinedYear;
+    }
+
+    if (episodeList && episodeList.length > 0) {
+      streamContext.episodeList = episodeList;
+    }
+
+    if (Object.keys(streamContext).length > 0) {
+      stream.context = streamContext;
     }
 
     return stream;
@@ -965,6 +1073,29 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       .toLowerCase();
   }
 
+  private extractDetailUrl(torrent: TorrentLike): string | undefined {
+    const record = torrent as Record<string, unknown>;
+    const candidates = [
+      this.toString(record.details),
+      this.toString(record.detail_url),
+      this.toString(record.detailUrl),
+      this.toString(record.page),
+    ];
+
+    for (const candidate of candidates) {
+      if (!candidate) {
+        continue;
+      }
+
+      const normalized = this.normalizeToUrl(candidate);
+      if (normalized) {
+        return normalized;
+      }
+    }
+
+    return undefined;
+  }
+
   private extractSourceDomain(torrent: TorrentLike): string | undefined {
     const record = torrent as Record<string, unknown>;
     const candidates = [
@@ -986,6 +1117,24 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     }
 
     return undefined;
+  }
+
+  private normalizeToUrl(raw: string): string | undefined {
+    let candidate = raw.trim();
+    if (!candidate) {
+      return undefined;
+    }
+
+    if (!/^https?:\/\//i.test(candidate)) {
+      candidate = `https://${candidate}`;
+    }
+
+    try {
+      const url = new URL(candidate);
+      return url.toString();
+    } catch {
+      return undefined;
+    }
   }
 
   private parseHostname(raw: string): string | undefined {
