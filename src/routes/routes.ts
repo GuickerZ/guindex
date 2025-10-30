@@ -124,8 +124,8 @@ fastify.all('/:token/stream/:type/:id.json', async (req, reply) => {
     }
     
     try {
-      const decodedMagnet = decodeURIComponent(magnet);
-      const directUrl = await streamController.processMagnetForPlayback(decodedMagnet, token);
+      const context = StreamService.decodeStreamContext(ctx);
+      const directUrl = await streamController.processMagnetForPlayback(decodedMagnet, token, context);
       reply.redirect(directUrl);
     } catch (error) {
       logger.error(`Magnet processing error: ${error instanceof Error ? error.message : 'Unknown error'}`);
