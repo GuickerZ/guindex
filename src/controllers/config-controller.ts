@@ -4,6 +4,7 @@
 
 import type { AddonManifest } from '../models/config-model.js';
 import { ConfigService } from '../services/config-service.js';
+
 import { StreamService } from '../services/stream-service.js';
 
 export class ConfigController {
