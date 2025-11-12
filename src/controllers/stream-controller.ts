@@ -34,6 +34,7 @@ export class StreamController {
       console.debug(`Found ${processableStreams.length} streams with magnet links`);
 
       // Return streams with our own API URLs - Real-Debrid processing will happen on play
+      const realDebridToken = StreamService.extractRealDebridToken({}, {}, extra);
       const streamMetadata: StreamResponse['streams'] = processableStreams.map(stream => {
         // Extract magnet link
         const magnet = stream.magnet || 
@@ -41,24 +42,30 @@ export class StreamController {
                        (stream.infoHash ? `magnet:?xt=urn:btih:${stream.infoHash}` : undefined);
         
         if (!magnet) {
-          return StreamService.createStreamMetadata(stream, '');
+          return StreamService.createStreamMetadata(stream, '', {
+            forceNotWebReady: true
+          });
         }
         
         // Create our own API URL that will process the magnet through Real-Debrid
-        const encodedMagnet = encodeURIComponent(magnet);
-        const token = StreamService.extractRealDebridToken({}, {}, extra);
-        
-        if (!token) {
-          console.debug('No Real-Debrid token provided, skipping stream');
-          return StreamService.createStreamMetadata(stream, '');
+        if (!realDebridToken) {
+          console.debug('No Real-Debrid token provided, returning magnet fallback');
+          return StreamService.createStreamMetadata(stream, magnet, {
+            forceNotWebReady: true,
+            realDebridReady: stream.cached ?? false
+          });
         }
-        
-        // Use configured base URL
+
+        const encodedMagnet = encodeURIComponent(magnet);
         const contextValue = StreamService.encodeStreamContext(stream.context);
         const querySuffix = contextValue ? `?ctx=${contextValue}` : '';
-        const apiUrl = `${this.config.baseUrl}/resolve/${token}/${encodedMagnet}${querySuffix}`;
+        const apiUrl = `${this.config.baseUrl}/resolve/${realDebridToken}/${encodedMagnet}${querySuffix}`;
 
-        return StreamService.createStreamMetadata(stream, apiUrl);
+        return StreamService.createStreamMetadata(stream, apiUrl, {
+          fallbackUrl: magnet,
+          forceNotWebReady: true,
+          realDebridReady: stream.cached ?? false
+        });
       });
 
       console.debug(`Returning ${streamMetadata.length} streams with magnet links`);

@@ -2,11 +2,17 @@
  * Stream Models
  */
 
+export interface StremioStreamBehaviorHints {
+  notWebReady?: boolean;
+  realDebridReady?: boolean;
+  fallbackMagnet?: string;
+}
+
 export interface StremioStream {
   name?: string;
   title?: string;
   url: string;
-  behaviorHints?: { notWebReady?: boolean };
+  behaviorHints?: StremioStreamBehaviorHints;
   infoHash?: string;
   externalUrl?: string;
   size?: number;

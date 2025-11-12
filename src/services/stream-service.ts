@@ -5,18 +5,45 @@
 import type { SourceStream, StreamContext } from '../models/source-model.js';
 import type { StremioStream, StreamResponse } from '../models/stream-model.js';
 
+interface StreamMetadataOptions {
+  fallbackUrl?: string;
+  forceNotWebReady?: boolean;
+  realDebridReady?: boolean;
+}
+
 export class StreamService {
-  static createStreamMetadata(sourceStream: SourceStream, url: string): StremioStream {
+  static createStreamMetadata(
+    sourceStream: SourceStream,
+    url?: string,
+    options?: StreamMetadataOptions
+  ): StremioStream {
+    const fallbackUrl = options?.fallbackUrl || sourceStream.magnet || sourceStream.url;
+    const resolvedUrl = url && url.trim().length > 0 ? url : fallbackUrl || '';
+    const behaviorHints: StremioStream['behaviorHints'] = {
+      notWebReady: options?.forceNotWebReady ?? resolvedUrl.startsWith('magnet:')
+    };
+
+    if (options?.realDebridReady !== undefined) {
+      behaviorHints.realDebridReady = options.realDebridReady;
+    }
+
+    if (fallbackUrl && fallbackUrl.startsWith('magnet:')) {
+      behaviorHints.fallbackMagnet = fallbackUrl;
+    }
+
     const metadata: StremioStream = {
       name: sourceStream.name || `[Brazuca RD] ${sourceStream.title || 'Unknown'}`,
       title: sourceStream.title || 'Unknown file',
-      url: url, // This will be either a magnet link or direct URL
-      behaviorHints: { notWebReady: false }
+      url: resolvedUrl,
+      behaviorHints
     };
 
     // Add optional properties only if they exist
     if (sourceStream.infoHash) metadata.infoHash = sourceStream.infoHash;
     if (sourceStream.url) metadata.externalUrl = sourceStream.url;
+    else if (!metadata.externalUrl && fallbackUrl && !fallbackUrl.startsWith('magnet:')) {
+      metadata.externalUrl = fallbackUrl;
+    }
     if (sourceStream.size !== undefined) metadata.size = sourceStream.size;
     if (sourceStream.seeders !== undefined) metadata.seeders = sourceStream.seeders;
     if (sourceStream.quality) metadata.quality = sourceStream.quality;
