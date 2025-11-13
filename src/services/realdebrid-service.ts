@@ -9,7 +9,15 @@ import type { StreamContext } from '../models/source-model.js';
 
 type InstantAvailabilityRecord = Record<string, unknown>;
 
+interface InstantAvailabilityCacheEntry {
+  cached: boolean;
+  expires: number;
+}
+
 export class RealDebridService {
+  private static readonly INSTANT_AVAILABILITY_TTL_MS = 5 * 60 * 1000; // 5 minutes
+  private static instantAvailabilityCache = new Map<string, InstantAvailabilityCacheEntry>();
+
   constructor(private token: string) {}
 
   async addMagnet(magnet: string): Promise<MagnetResponse> {
@@ -33,48 +41,72 @@ export class RealDebridService {
     hashes: string[],
     token?: string
   ): Promise<Set<string>> {
-    const cached = new Set<string>();
-    if (!hashes || hashes.length === 0 || !token) {
-      return cached;
+    const result = new Set<string>();
+    if (!hashes || hashes.length === 0) {
+      return result;
     }
 
-    const headers: Record<string, string> = {};
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
+    const normalizedHashes = hashes
+      .map((hash) => hash?.toLowerCase())
+      .filter((hash): hash is string => Boolean(hash));
+
+    const now = Date.now();
+    const hashesToFetch: string[] = [];
+
+    for (const hash of normalizedHashes) {
+      const cacheEntry = this.instantAvailabilityCache.get(hash);
+      if (cacheEntry && cacheEntry.expires > now) {
+        if (cacheEntry.cached) {
+          result.add(hash);
+        }
+      } else if (token) {
+        hashesToFetch.push(hash);
+      }
     }
 
+    if (!token || hashesToFetch.length === 0) {
+      return result;
+    }
+
+    const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
     const chunkSize = 50;
-    for (let i = 0; i < hashes.length; i += chunkSize) {
-      const chunk = hashes.slice(i, i + chunkSize);
-      const upperChunk = chunk.map((hash) => hash.toUpperCase());
 
-      let payload = await this.fetchInstantAvailabilityPayload(
+    for (let i = 0; i < hashesToFetch.length; i += chunkSize) {
+      const chunk = hashesToFetch.slice(i, i + chunkSize);
+      const upperChunk = chunk.map((hash) => hash.toUpperCase());
+      let chunkPayload = await this.fetchInstantAvailabilityPayload(
         `https://api.real-debrid.com/rest/1.0/torrents/instantAvailability/${upperChunk.join('/')}`,
         headers
       );
 
-      if (!payload || this.isPayloadEmpty(payload)) {
-        payload = await this.fetchInstantAvailabilityPayload(
+      if (!chunkPayload || this.isPayloadEmpty(chunkPayload)) {
+        chunkPayload = await this.fetchInstantAvailabilityPayload(
           `https://api.real-debrid.com/rest/1.0/torrents/instantAvailability/${upperChunk.join(',')}`,
           headers
         );
       }
 
-      if (payload && !this.isPayloadEmpty(payload)) {
-        this.collectCachedHashesFromPayload(payload, cached);
+      if (chunkPayload && !this.isPayloadEmpty(chunkPayload)) {
+        const chunkCached = new Set<string>();
+        this.collectCachedHashesFromPayload(chunkPayload, chunkCached);
+        for (const hash of chunkCached) {
+          result.add(hash);
+        }
+        this.updateAvailabilityCache(chunk, chunkCached, now);
         continue;
       }
 
-      await this.fetchPerHash(chunk, headers, cached);
+      await this.fetchPerHash(chunk, headers, result, now);
     }
 
-    return cached;
+    return result;
   }
 
   private static async fetchPerHash(
     hashes: string[],
     headers: Record<string, string>,
-    cached: Set<string>
+    cached: Set<string>,
+    now: number
   ): Promise<void> {
     for (const hash of hashes) {
       const payload = await this.fetchInstantAvailabilityPayload(
@@ -82,9 +114,15 @@ export class RealDebridService {
         headers
       );
 
+      const perHashCached = new Set<string>();
       if (payload && !this.isPayloadEmpty(payload)) {
-        this.collectCachedHashesFromPayload(payload, cached);
+        this.collectCachedHashesFromPayload(payload, perHashCached);
+        for (const cachedHash of perHashCached) {
+          cached.add(cachedHash);
+        }
       }
+
+      this.updateAvailabilityCache([hash], perHashCached, now);
     }
   }
 
@@ -157,6 +195,21 @@ export class RealDebridService {
     }
 
     return false;
+  }
+
+  private static updateAvailabilityCache(
+    hashes: string[],
+    cachedHashes: Set<string>,
+    now: number
+  ): void {
+    const expires = now + this.INSTANT_AVAILABILITY_TTL_MS;
+    for (const hash of hashes) {
+      const normalized = hash.toLowerCase();
+      this.instantAvailabilityCache.set(normalized, {
+        cached: cachedHashes.has(normalized),
+        expires
+      });
+    }
   }
 
   async selectFiles(torrentId: string, fileIds: string): Promise<void> {

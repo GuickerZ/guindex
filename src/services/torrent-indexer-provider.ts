@@ -255,17 +255,6 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       return;
     }
 
-    if (!token) {
-      for (const relatedStreams of hashToStreams.values()) {
-        for (const s of relatedStreams) {
-          if (s.cached === undefined) {
-            s.cached = false;
-          }
-        }
-      }
-      return;
-    }
-
     let cachedHashes = new Set<string>();
     try {
       cachedHashes = await RealDebridService.fetchCachedInfoHashes(
