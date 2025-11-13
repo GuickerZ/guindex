@@ -4,6 +4,7 @@
  */
 
 import Fastify from 'fastify';
+import type { FastifyReply } from 'fastify';
 import pino from 'pino';
 import path from 'path';
 import stremioAddonSdk from 'stremio-addon-sdk';
@@ -114,12 +115,12 @@ export function setupRoutes() {
     }
   });
 
-  fastify.get('/resolve/:token/:magnet', async (req, reply) => {
-    const params = req.params as { token: string; magnet: string };
-    const token = params.token;
-    const magnetParam = params.magnet;
-    const { ctx } = req.query as { ctx?: string };
-
+  const handleResolveRequest = async (
+    reply: FastifyReply,
+    token?: string,
+    magnetParam?: string,
+    ctx?: string
+  ) => {
     if (!magnetParam) {
       reply.status(400).send({ error: 'Magnet link is required' });
       return;
@@ -131,14 +132,25 @@ export function setupRoutes() {
     }
 
     try {
-      const decodedMagnet = decodeURIComponent(magnetParam);
       const context = StreamService.decodeStreamContext(ctx);
-      const directUrl = await streamController.processMagnetForPlayback(decodedMagnet, token, context);
+      const directUrl = await streamController.processMagnetForPlayback(magnetParam, token, context);
       reply.redirect(directUrl);
     } catch (error) {
       logger.error(`Magnet processing error: ${error instanceof Error ? error.message : 'Unknown error'}`);
       reply.status(500).send({ error: 'Failed to process magnet link' });
     }
+  };
+
+  fastify.get('/resolve', async (req, reply) => {
+    const { token, magnet, ctx } = req.query as { token?: string; magnet?: string; ctx?: string };
+    await handleResolveRequest(reply, token, magnet, ctx);
+  });
+
+  fastify.get('/resolve/:token/:magnet', async (req, reply) => {
+    const params = req.params as { token: string; magnet: string };
+    const { ctx } = req.query as { ctx?: string };
+
+    await handleResolveRequest(reply, params.token, params.magnet, ctx);
   });
 
   fastify.get('/placeholder/downloading.mp4', async (_req, reply) => {

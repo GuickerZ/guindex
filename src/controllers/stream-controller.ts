@@ -122,10 +122,18 @@ export class StreamController {
   }
 
   private buildResolveUrl(token: string, magnet: string, context?: StreamContext): string {
-    const encodedToken = encodeURIComponent(token);
-    const encodedMagnet = encodeURIComponent(magnet);
+    const base = this.resolveBaseUrl.endsWith('/')
+      ? this.resolveBaseUrl
+      : `${this.resolveBaseUrl}/`;
+    const url = new URL('resolve', base);
+    url.searchParams.set('token', token);
+    url.searchParams.set('magnet', magnet);
+
     const contextValue = StreamService.encodeStreamContext(context);
-    const querySuffix = contextValue ? `?ctx=${contextValue}` : '';
-    return `${this.resolveBaseUrl}/resolve/${encodedToken}/${encodedMagnet}${querySuffix}`;
+    if (contextValue) {
+      url.searchParams.set('ctx', contextValue);
+    }
+
+    return url.toString();
   }
 }
