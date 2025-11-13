@@ -3,7 +3,7 @@
  */
 
 import { request } from 'undici';
-import { BaseSourceProvider } from './base-source-provider.js';
+import { BaseSourceProvider, type SourceFetchOptions } from './base-source-provider.js';
 import type { SourceStream } from '../models/source-model.js';
 
 export class StremioAddonProvider extends BaseSourceProvider {
@@ -11,7 +11,11 @@ export class StremioAddonProvider extends BaseSourceProvider {
     super(name);
   }
 
-  async getStreams(type: string, id: string): Promise<SourceStream[]> {
+  async getStreams(
+    type: string,
+    id: string,
+    _options?: SourceFetchOptions
+  ): Promise<SourceStream[]> {
     const url = `${this.baseUrl}/stream/${type}/${id}.json`;
     const response = await request(url);
     

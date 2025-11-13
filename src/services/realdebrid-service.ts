@@ -34,7 +34,7 @@ export class RealDebridService {
     token?: string
   ): Promise<Set<string>> {
     const cached = new Set<string>();
-    if (!hashes || hashes.length === 0) {
+    if (!hashes || hashes.length === 0 || !token) {
       return cached;
     }
 

@@ -3,7 +3,7 @@
  */
 
 import { request } from 'undici';
-import { BaseSourceProvider } from './base-source-provider.js';
+import { BaseSourceProvider, type SourceFetchOptions } from './base-source-provider.js';
 import { RealDebridService } from './realdebrid-service.js';
 import type { SourceStream, StreamContext } from '../models/source-model.js';
 
@@ -130,7 +130,11 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     this.baseUrl = baseUrl.replace(/\/$/, '');
   }
 
-  async getStreams(type: string, id: string): Promise<SourceStream[]> {
+  async getStreams(
+    type: string,
+    id: string,
+    options?: SourceFetchOptions
+  ): Promise<SourceStream[]> {
     const parsed = this.parseId(id);
     const meta = await this.fetchCinemetaMeta(type, id);
     const displayTitles = this.collectMetaTitles(meta);
@@ -208,7 +212,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       return streams;
     }
 
-    await this.decorateWithRealDebrid(streams);
+    await this.decorateWithRealDebrid(streams, options?.realdebridToken);
 
     return streams;
   }
@@ -227,35 +231,51 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     return undefined;
   }
 
-  private async decorateWithRealDebrid(streams: SourceStream[]): Promise<void> {
+  private async decorateWithRealDebrid(
+    streams: SourceStream[],
+    token?: string
+  ): Promise<void> {
     const hashToStreams = new Map<string, SourceStream[]>();
-  
+
     for (const stream of streams) {
       const hash = this.getStreamInfoHash(stream);
       if (!hash) {
-        // garante que streams sem hash explícito fiquem non-cached
         stream.cached = false;
         continue;
       }
-  
+
       const normalized = hash.toLowerCase();
       if (!hashToStreams.has(normalized)) {
         hashToStreams.set(normalized, []);
       }
       hashToStreams.get(normalized)!.push(stream);
     }
-  
+
     if (hashToStreams.size === 0) {
       return;
     }
-  
-    const token = (process.env.REALDEBRID_TOKEN || (this as any).realDebridToken) as string | undefined;
-    const cachedHashes = await RealDebridService.fetchCachedInfoHashes(
-      [...hashToStreams.keys()],
-      token
-    );
-  
-    // garanta que todos recebam cached boolean (true/false)
+
+    if (!token) {
+      for (const relatedStreams of hashToStreams.values()) {
+        for (const s of relatedStreams) {
+          if (s.cached === undefined) {
+            s.cached = false;
+          }
+        }
+      }
+      return;
+    }
+
+    let cachedHashes = new Set<string>();
+    try {
+      cachedHashes = await RealDebridService.fetchCachedInfoHashes(
+        [...hashToStreams.keys()],
+        token
+      );
+    } catch {
+      cachedHashes = new Set<string>();
+    }
+
     for (const [hash, relatedStreams] of hashToStreams.entries()) {
       const isCached = cachedHashes.has(hash);
       for (const s of relatedStreams) {
@@ -266,140 +286,6 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       }
     }
   }
-  
-  private async fetchCachedHashes(hashes: string[]): Promise<Set<string>> {
-    const cached = new Set<string>();
-    if (!hashes || hashes.length === 0) {
-      return cached;
-    }
-  
-    const chunkSize = 50;
-    const token = (process.env.REALDEBRID_TOKEN || (this as any).realDebridToken) as string | undefined;
-    const headers: Record<string,string> = {};
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-  
-    const doRequest = async (endpoint: string) => {
-      try {
-        const response = await request(endpoint, { headers });
-        console.log(response)
-        const status = response.statusCode ?? 0;
-        // Se o RD retornar 404 ou 204 ou 400, consideramos tentativa falhada (vai cair no fallback per-hash)
-        if (status >= 400) {
-          // tenta ler body por precaução (algumas implementações retornam JSON mesmo com 404)
-          try {
-            const maybe = await response.body.json();
-            console.log(maybe)
-
-            if (maybe && typeof maybe === 'object' && Object.keys(maybe).length > 0) {
-              return maybe as Record<string, unknown>;
-            }
-          } catch {
-            // ignora
-          }
-          return undefined;
-        }
-  
-        const payload = (await response.body.json()) as Record<string, unknown> | undefined;
-        return payload;
-      } catch {
-        return undefined;
-      }
-    };
-  
-    const tryPerHash = async (hashList: string[]) => {
-      for (const h of hashList) {
-        const upper = h.toUpperCase();
-        const endpoint = `https://api.real-debrid.com/rest/1.0/torrents/instantAvailability/${upper}`;
-        const payload = await doRequest(endpoint);
-        if (!payload || typeof payload !== 'object') {
-          continue;
-        }
-        for (const [key, value] of Object.entries(payload)) {
-          try {
-            if (this.isInstantAvailabilityCached(value)) {
-              cached.add(key.toLowerCase());
-            }
-          } catch {
-            // ignore parse errors
-          }
-        }
-      }
-    };
-  
-    for (let i = 0; i < hashes.length; i += chunkSize) {
-      const chunk = hashes.slice(i, i + chunkSize);
-      const upperChunk = chunk.map((h) => h.toUpperCase());
-  
-      // tentar formato com '/' (bulk)
-      const endpoints = [
-        `https://api.real-debrid.com/rest/1.0/torrents/instantAvailability/${upperChunk.join('/')}`,
-        `https://api.real-debrid.com/rest/1.0/torrents/instantAvailability/${upperChunk.join(',')}`
-      ];
-  
-      let payload: Record<string, unknown> | undefined;
-      for (const ep of endpoints) {
-        payload = await doRequest(ep);
-        if (payload && typeof payload === 'object' && Object.keys(payload).length > 0) {
-          break;
-        }
-      }
-  
-      if (payload && typeof payload === 'object' && Object.keys(payload).length > 0) {
-        for (const [key, value] of Object.entries(payload)) {
-          try {
-            if (this.isInstantAvailabilityCached(value)) {
-              cached.add(key.toLowerCase());
-            }
-          } catch {
-            // ignore
-          }
-        }
-        continue; // chunk processado
-      }
-  
-      // fallback per-hash quando bulk falha (muitos 404)
-      await tryPerHash(chunk);
-    }
-  
-    return cached;
-  }
-  
-
-  private isInstantAvailabilityCached(value: unknown): boolean {
-    if (!value || typeof value !== 'object') {
-      return false;
-    }
-
-    const record = value as Record<string, unknown>;
-    const keys = ['rd', 'rdp'];
-
-    for (const key of keys) {
-      if (this.hasCachedNested(record[key])) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  private hasCachedNested(value: unknown): boolean {
-    if (!value) {
-      return false;
-    }
-
-    if (Array.isArray(value)) {
-      return value.length > 0;
-    }
-
-    if (typeof value === 'object') {
-      return Object.values(value as Record<string, unknown>).some((entry) => this.hasCachedNested(entry));
-    }
-
-    return false;
-  }
-
   private getStreamInfoHash(stream: SourceStream): string | undefined {
     if (typeof stream.infoHash === 'string' && stream.infoHash.trim()) {
       return stream.infoHash.trim().toLowerCase();
@@ -1473,3 +1359,5 @@ private mapTorrentToStream(
     return undefined;
   }
 }
+
+

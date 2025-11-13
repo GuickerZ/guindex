@@ -20,7 +20,16 @@ export class StreamController {
       console.debug(`Processing stream request: ${type}/${id}`);
       
       // Fetch streams from all configured sources
-      const sourceStreams = await SourceService.fetchStreamsFromAllSources(type, id);
+      const envToken = process.env.REALDEBRID_TOKEN;
+      const realDebridToken = StreamService.extractRealDebridToken(
+        {},
+        {},
+        extra,
+        envToken ? { token: envToken } : undefined
+      );
+      const tokenForSources = realDebridToken ?? envToken;
+      const fetchOptions = tokenForSources ? { realdebridToken: tokenForSources } : undefined;
+      const sourceStreams = await SourceService.fetchStreamsFromAllSources(type, id, fetchOptions);
       
       // Filter streams that have magnet links or infoHash
       const processableStreams = sourceStreams.filter((stream) =>
@@ -34,14 +43,7 @@ export class StreamController {
 
       console.debug(`Found ${processableStreams.length} streams with magnet links`);
 
-      const envToken = process.env.REALDEBRID_TOKEN;
-      const realDebridToken = StreamService.extractRealDebridToken(
-        {},
-        {},
-        extra,
-        envToken ? { token: envToken } : undefined
-      );
-      await this.ensureRealDebridAvailability(processableStreams, realDebridToken ?? envToken);
+      await this.ensureRealDebridAvailability(processableStreams, tokenForSources);
 
       if (!realDebridToken) {
         console.debug('No Real-Debrid token provided, returning magnet fallback streams');
@@ -55,10 +57,11 @@ export class StreamController {
             return undefined;
           }
 
+          const isCached = stream.cached ?? false;
           const commonOptions = {
             fallbackMagnet: magnet,
-            forceNotWebReady: true,
-            realDebridReady: stream.cached ?? false
+            forceNotWebReady: !isCached || !realDebridToken,
+            realDebridReady: isCached
           };
 
           if (!realDebridToken) {
