@@ -153,6 +153,11 @@ export function setupRoutes() {
       method: ['GET', 'HEAD'],
       url,
       handler: async (req, reply) => {
+        if (req.method === 'HEAD') {
+          respondProbeSuccess(reply);
+          return;
+        }
+
         const { token, magnet, ctx } = extractor(req);
 
         if (!magnet) {
@@ -164,12 +169,6 @@ export function setupRoutes() {
           reply.status(400).send({ error: 'Real-Debrid token is required' });
           return;
         }
-
-        if (req.method === 'HEAD') {
-          respondProbeSuccess(reply);
-          return;
-        }
-
         await handleResolveRequest(reply, token, magnet, ctx);
       }
     });

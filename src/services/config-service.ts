@@ -11,7 +11,6 @@ export class ConfigService {
 
     const normalizedBaseUrl =
       ConfigService.normalizeBaseUrl(process.env.BASE_URL) ||
-      ConfigService.normalizeBaseUrl(process.env.VERCEL_URL) ||
       ConfigService.normalizeBaseUrl('https://brazuca-rd.vercel.app')!;
 
     // Debug logging for environment variables
