@@ -4,7 +4,7 @@
  */
 
 import Fastify from 'fastify';
-import type { FastifyReply } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import pino from 'pino';
 import path from 'path';
 import stremioAddonSdk from 'stremio-addon-sdk';
@@ -115,25 +115,23 @@ export function setupRoutes() {
     }
   });
 
+  const respondProbeSuccess = (reply: FastifyReply) => {
+    reply
+      .status(204)
+      .header('cache-control', 'no-store, max-age=0')
+      .header('x-brazuca-rd-probe', 'ok')
+      .send();
+  };
+
   const handleResolveRequest = async (
     reply: FastifyReply,
-    token?: string,
-    magnetParam?: string,
+    token: string,
+    magnet: string,
     ctx?: string
   ) => {
-    if (!magnetParam) {
-      reply.status(400).send({ error: 'Magnet link is required' });
-      return;
-    }
-
-    if (!token) {
-      reply.status(400).send({ error: 'Real-Debrid token is required' });
-      return;
-    }
-
     try {
       const context = StreamService.decodeStreamContext(ctx);
-      const directUrl = await streamController.processMagnetForPlayback(magnetParam, token, context);
+      const directUrl = await streamController.processMagnetForPlayback(magnet, token, context);
       reply.redirect(directUrl);
     } catch (error) {
       logger.error(`Magnet processing error: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -141,16 +139,51 @@ export function setupRoutes() {
     }
   };
 
-  fastify.get('/resolve', async (req, reply) => {
-    const { token, magnet, ctx } = req.query as { token?: string; magnet?: string; ctx?: string };
-    await handleResolveRequest(reply, token, magnet, ctx);
+  type ResolveRouteValues = {
+    token?: string | undefined;
+    magnet?: string | undefined;
+    ctx?: string | undefined;
+  };
+
+  const registerResolveRoute = (
+    url: string,
+    extractor: (req: FastifyRequest) => ResolveRouteValues
+  ) => {
+    fastify.route({
+      method: ['GET', 'HEAD'],
+      url,
+      handler: async (req, reply) => {
+        const { token, magnet, ctx } = extractor(req);
+
+        if (!magnet) {
+          reply.status(400).send({ error: 'Magnet link is required' });
+          return;
+        }
+
+        if (!token) {
+          reply.status(400).send({ error: 'Real-Debrid token is required' });
+          return;
+        }
+
+        if (req.method === 'HEAD') {
+          respondProbeSuccess(reply);
+          return;
+        }
+
+        await handleResolveRequest(reply, token, magnet, ctx);
+      }
+    });
+  };
+
+  registerResolveRoute('/resolve', (req) => {
+    const query = req.query as { token?: string; magnet?: string; ctx?: string };
+    return { token: query.token, magnet: query.magnet, ctx: query.ctx };
   });
 
-  fastify.get('/resolve/:token/:magnet', async (req, reply) => {
-    const params = req.params as { token: string; magnet: string };
-    const { ctx } = req.query as { ctx?: string };
-
-    await handleResolveRequest(reply, params.token, params.magnet, ctx);
+  registerResolveRoute('/resolve/:token/:magnet', (req) => {
+    const params = req.params as { token?: string; magnet?: string };
+    const query = req.query as { ctx?: string };
+    return { token: params.token, magnet: params.magnet, ctx: query.ctx };
   });
 
   fastify.get('/placeholder/downloading.mp4', async (_req, reply) => {
