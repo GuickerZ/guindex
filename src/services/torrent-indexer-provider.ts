@@ -41,6 +41,8 @@ interface CinemetaMeta {
 type TorrentLike = Record<string, unknown>;
 
 const MAX_STREAMS = 60;
+const EPISODIC_HINT_REGEX =
+  /(S[0-9]{1,3}(E[0-9]{1,3})?|S[0-9]{1,3}[._ -]?(19|20)[0-9]{2}|[0-9]+x[0-9]+|temporada|season|episódio|episodio|episode|serie|série|ep[0-9]+|completa)/i;
 
 const LANGUAGE_FLAG_MAP: Record<string, string> = {
   portugues: '🇧🇷',
@@ -441,6 +443,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
   private isRelevantTorrent(torrent: TorrentLike, context: MatchContext): boolean {
     const { parsed, type, targetTitles, releaseYear } = context;
+    const normalizedType = type.toLowerCase();
     const imdb = this.extractImdb(torrent);
 
     if (parsed.imdbId && imdb) {
@@ -461,14 +464,20 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       }
     }
 
-    if (type.toLowerCase() === 'movie' && releaseYear !== undefined) {
-      const torrentYear = this.extractYear(torrent);
-      if (torrentYear !== undefined && Math.abs(torrentYear - releaseYear) > 1) {
+    if (normalizedType === 'movie') {
+      if (this.hasEpisodePattern(torrent)) {
         return false;
+      }
+
+      if (releaseYear !== undefined) {
+        const torrentYear = this.extractYear(torrent);
+        if (torrentYear !== undefined && Math.abs(torrentYear - releaseYear) > 1) {
+          return false;
+        }
       }
     }
 
-    if (type.toLowerCase() !== 'movie' && parsed.season !== undefined) {
+    if (normalizedType !== 'movie' && parsed.season !== undefined) {
       const torrentSeason = this.extractSeason(torrent);
       if (torrentSeason !== undefined && torrentSeason !== parsed.season) {
         return false;
@@ -488,6 +497,26 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     }
 
     return true;
+  }
+
+  private hasEpisodePattern(torrent: TorrentLike): boolean {
+    const titles = this.collectTorrentTitles(torrent);
+    if (titles.some((title) => EPISODIC_HINT_REGEX.test(title))) {
+      return true;
+    }
+
+    const record = torrent as Record<string, unknown>;
+    const extraFields = [
+      record.description,
+      record.details,
+      record.tagline,
+      record.summary,
+      record.plot,
+    ];
+
+    return extraFields.some(
+      (value) => typeof value === 'string' && EPISODIC_HINT_REGEX.test(value),
+    );
   }
 
   private extractImdb(torrent: TorrentLike): string | undefined {
