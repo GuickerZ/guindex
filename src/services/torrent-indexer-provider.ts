@@ -4,6 +4,7 @@
 
 import { request } from 'undici';
 import { BaseSourceProvider } from './base-source-provider.js';
+import { RealDebridService } from './realdebrid-service.js';
 import type { SourceStream, StreamContext } from '../models/source-model.js';
 
 interface ParsedIdInfo {
@@ -248,7 +249,11 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       return;
     }
   
-    const cachedHashes = await this.fetchCachedHashes([...hashToStreams.keys()]);
+    const token = (process.env.REALDEBRID_TOKEN || (this as any).realDebridToken) as string | undefined;
+    const cachedHashes = await RealDebridService.fetchCachedInfoHashes(
+      [...hashToStreams.keys()],
+      token
+    );
   
     // garanta que todos recebam cached boolean (true/false)
     for (const [hash, relatedStreams] of hashToStreams.entries()) {

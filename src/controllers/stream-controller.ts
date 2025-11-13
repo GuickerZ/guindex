@@ -34,7 +34,6 @@ export class StreamController {
 
       console.debug(`Found ${processableStreams.length} streams with magnet links`);
 
-      // Return streams with our own API URLs - Real-Debrid processing will happen on play
       const envToken = process.env.REALDEBRID_TOKEN;
       const realDebridToken = StreamService.extractRealDebridToken(
         {},
@@ -42,6 +41,7 @@ export class StreamController {
         extra,
         envToken ? { token: envToken } : undefined
       );
+      await this.ensureRealDebridAvailability(processableStreams, realDebridToken ?? envToken);
 
       if (!realDebridToken) {
         console.debug('No Real-Debrid token provided, returning magnet fallback streams');
@@ -119,6 +119,65 @@ export class StreamController {
       return `magnet:?xt=urn:btih:${stream.infoHash}`;
     }
     return undefined;
+  }
+
+  private getStreamInfoHash(stream: SourceStream): string | undefined {
+    if (typeof stream.infoHash === 'string' && stream.infoHash.trim()) {
+      return stream.infoHash.trim().toLowerCase();
+    }
+
+    const magnet = this.extractStreamMagnet(stream);
+    if (!magnet) {
+      return undefined;
+    }
+
+    const match = magnet.match(/xt=urn:btih:([^&]+)/i);
+    if (!match?.[1]) {
+      return undefined;
+    }
+
+    return match[1].trim().toLowerCase();
+  }
+
+  private async ensureRealDebridAvailability(
+    streams: SourceStream[],
+    token?: string
+  ): Promise<void> {
+    const pendingHashes = new Map<string, SourceStream[]>();
+
+    for (const stream of streams) {
+      if (stream.cached !== undefined) {
+        continue;
+      }
+
+      const hash = this.getStreamInfoHash(stream);
+      if (!hash) {
+        continue;
+      }
+
+      if (!pendingHashes.has(hash)) {
+        pendingHashes.set(hash, []);
+      }
+      pendingHashes.get(hash)!.push(stream);
+    }
+
+    if (pendingHashes.size === 0) {
+      return;
+    }
+
+    const cachedHashes = await RealDebridService.fetchCachedInfoHashes(
+      [...pendingHashes.keys()],
+      token
+    );
+
+    for (const [hash, relatedStreams] of pendingHashes.entries()) {
+      const isCached = cachedHashes.has(hash);
+      for (const stream of relatedStreams) {
+        if (stream.cached === undefined) {
+          stream.cached = isCached;
+        }
+      }
+    }
   }
 
   private buildResolveUrl(token: string, magnet: string, context?: StreamContext): string {
