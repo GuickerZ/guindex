@@ -3,26 +3,77 @@
  */
 
 import type { SourceStream, StreamContext } from '../models/source-model.js';
-import type { StremioStream, StreamResponse } from '../models/stream-model.js';
+import type { StremioStream, StremioStreamBehaviorHints } from '../models/stream-model.js';
+
+interface StreamMetadataOptions {
+  fallbackMagnet?: string;
+  forceNotWebReady?: boolean;
+  realDebridReady?: boolean;
+}
 
 export class StreamService {
-  static createStreamMetadata(sourceStream: SourceStream, url: string): StremioStream {
+  static createStreamMetadata(
+    sourceStream: SourceStream,
+    url: string,
+    options?: StreamMetadataOptions
+  ): StremioStream {
+    const fallbackTitle = sourceStream.title || 'Unknown file';
+    const rdReady = options?.realDebridReady ?? sourceStream.cached ?? false;
+    const rdLabel = rdReady ? 'RD+' : 'RD';
+    const baseName = sourceStream.name || `[Brazuca RD] ${fallbackTitle}`;
+
     const metadata: StremioStream = {
-      name: sourceStream.name || `[Brazuca RD] ${sourceStream.title || 'Unknown'}`,
-      title: sourceStream.title || 'Unknown file',
-      url: url, // This will be either a magnet link or direct URL
-      behaviorHints: { notWebReady: false }
+      name: `[${rdLabel}] ${baseName}`,
+      title: fallbackTitle,
+      url
     };
+
+    const behaviorHints: StremioStreamBehaviorHints = {};
+    const shouldForceNotWebReady = options?.forceNotWebReady ?? true;
+    if (shouldForceNotWebReady) {
+      behaviorHints.notWebReady = true;
+    }
+    behaviorHints.realDebridReady = rdReady;
+    if (options?.fallbackMagnet) {
+      behaviorHints.fallbackMagnet = options.fallbackMagnet;
+    }
+    if (Object.keys(behaviorHints).length > 0) {
+      metadata.behaviorHints = behaviorHints;
+    }
 
     // Add optional properties only if they exist
     if (sourceStream.infoHash) metadata.infoHash = sourceStream.infoHash;
-    if (sourceStream.url) metadata.externalUrl = sourceStream.url;
+    const externalUrl = StreamService.sanitizeExternalUrl(sourceStream.url);
+    if (externalUrl) metadata.externalUrl = externalUrl;
     if (sourceStream.size !== undefined) metadata.size = sourceStream.size;
     if (sourceStream.seeders !== undefined) metadata.seeders = sourceStream.seeders;
     if (sourceStream.quality) metadata.quality = sourceStream.quality;
     if (sourceStream.releaseGroup) metadata.releaseGroup = sourceStream.releaseGroup;
 
     return metadata;
+  }
+
+  private static sanitizeExternalUrl(url?: string): string | undefined {
+    if (!url) {
+      return undefined;
+    }
+
+    const trimmed = url.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+
+    if (!/^https:\/\//i.test(trimmed)) {
+      return undefined;
+    }
+
+    try {
+      const parsed = new URL(trimmed);
+      parsed.protocol = 'https:';
+      return parsed.toString();
+    } catch {
+      return undefined;
+    }
   }
 
   static encodeStreamContext(context?: StreamContext): string | undefined {
@@ -69,23 +120,24 @@ export class StreamService {
   }
 
   static extractRealDebridToken(
-  query: any,
-  headers: any,
-  extra?: { realdebridToken?: string; token?: string },
-  params?: { token?: string }
-): string | undefined {
-  const token =
-    query.realdebridToken ||
-    query.rdToken ||
-    query.token ||
-    headers['x-rd-token'] ||
-    extra?.realdebridToken ||
-    extra?.token ||
-    params?.token;
+    query: any,
+    headers: any,
+    extra?: { realdebridToken?: string; token?: string },
+    params?: { token?: string }
+  ): string | undefined {
+    const token =
+      query.realdebridToken ||
+      query.rdToken ||
+      query.token ||
+      headers['x-rd-token'] ||
+      extra?.realdebridToken ||
+      extra?.token ||
+      params?.token;
 
-  // Valida token com tamanho típico do Real-Debrid
-  if (token && token.length > 20) return token;
-  return undefined;
-}
-
+    // Validate token length using the typical Real-Debrid size to avoid accidental short inputs
+    if (token && token.length > 20) {
+      return token;
+    }
+    return undefined;
+  }
 }

@@ -2,8 +2,8 @@
  * Stream Controller
  */
 
-import type { StreamRequest, StreamResponse } from '../models/stream-model.js';
-import type { StreamContext } from '../models/source-model.js';
+import type { StremioStream, StreamRequest, StreamResponse } from '../models/stream-model.js';
+import type { SourceStream, StreamContext } from '../models/source-model.js';
 import { RealDebridService } from '../services/realdebrid-service.js';
 import { SourceService } from '../services/source-service.js';
 import { StreamService } from '../services/stream-service.js';
@@ -11,6 +11,7 @@ import { ConfigService } from '../services/config-service.js';
 
 export class StreamController {
   private config = ConfigService.loadConfig();
+  private readonly resolveBaseUrl = this.config.baseUrl;
 
   async handleStreamRequest(args: StreamRequest): Promise<StreamResponse> {
     const { type, id, extra } = args;
@@ -22,50 +23,57 @@ export class StreamController {
       const sourceStreams = await SourceService.fetchStreamsFromAllSources(type, id);
       
       // Filter streams that have magnet links or infoHash
-      const processableStreams = sourceStreams.filter(stream => 
-        stream.magnet || 
-        stream.infoHash || 
-        (stream.url && stream.url.startsWith('magnet:'))
+      const processableStreams = sourceStreams.filter((stream) =>
+        stream.magnet || stream.infoHash || (stream.url && stream.url.startsWith('magnet:'))
       );
-      
+
       if (processableStreams.length === 0) {
+        console.debug('No processable magnet streams were found');
+        return { streams: [] };
       }
 
       console.debug(`Found ${processableStreams.length} streams with magnet links`);
 
       // Return streams with our own API URLs - Real-Debrid processing will happen on play
-      const realDebridToken = StreamService.extractRealDebridToken({}, {}, extra);
-      const streamMetadata: StreamResponse['streams'] = processableStreams.map(stream => {
-        // Extract magnet link
-        const magnet = stream.magnet || 
-                       stream.url || 
-                       (stream.infoHash ? `magnet:?xt=urn:btih:${stream.infoHash}` : undefined);
-        
-        if (!magnet) {
-          return StreamService.createStreamMetadata(stream, '', {
-            forceNotWebReady: true
-          });
-        }
-        
-        // Create our own API URL that will process the magnet through Real-Debrid
-        if (!realDebridToken) {
-          console.debug('No Real-Debrid token provided, returning magnet fallback');
-          return StreamService.createStreamMetadata(stream, magnet, {
+      const envToken = process.env.REALDEBRID_TOKEN;
+      const realDebridToken = StreamService.extractRealDebridToken(
+        {},
+        {},
+        extra,
+        envToken ? { token: envToken } : undefined
+      );
+
+      if (!realDebridToken) {
+        console.debug('No Real-Debrid token provided, returning magnet fallback streams');
+      }
+
+      const streamMetadata: StremioStream[] = processableStreams
+        .map((stream) => {
+          const magnet = this.extractStreamMagnet(stream);
+          if (!magnet) {
+            console.debug(`Skipping stream without magnet/infoHash: ${stream.name ?? stream.title}`);
+            return undefined;
+          }
+
+          const commonOptions = {
+            fallbackMagnet: magnet,
             forceNotWebReady: true,
             realDebridReady: stream.cached ?? false
-          });
-        }
+          };
 
-        const encodedMagnet = encodeURIComponent(magnet);
-        const contextValue = StreamService.encodeStreamContext(stream.context);
-        const querySuffix = contextValue ? `?ctx=${contextValue}` : '';
-        const apiUrl = `${this.config.baseUrl}/resolve/${realDebridToken}/${encodedMagnet}${querySuffix}`;
+          if (!realDebridToken) {
+            return StreamService.createStreamMetadata(stream, magnet, commonOptions);
+          }
 
-        return StreamService.createStreamMetadata(stream, apiUrl, {
-          fallbackUrl: magnet,
-          forceNotWebReady: true,
-          realDebridReady: stream.cached ?? false
-        });
+          const apiUrl = this.buildResolveUrl(realDebridToken, magnet, stream.context);
+          return StreamService.createStreamMetadata(stream, apiUrl, commonOptions);
+        })
+        .filter((stream): stream is StremioStream => Boolean(stream));
+
+      streamMetadata.sort((a, b) => {
+        const aReady = a.behaviorHints?.realDebridReady ? 1 : 0;
+        const bReady = b.behaviorHints?.realDebridReady ? 1 : 0;
+        return bReady - aReady;
       });
 
       console.debug(`Returning ${streamMetadata.length} streams with magnet links`);
@@ -98,5 +106,26 @@ export class StreamController {
       console.error(`Failed to process magnet for playback: ${error instanceof Error ? error.message : 'Unknown error'}`);
       throw error;
     }
+  }
+
+  private extractStreamMagnet(stream: SourceStream): string | undefined {
+    if (stream.magnet && stream.magnet.toLowerCase().startsWith('magnet:')) {
+      return stream.magnet;
+    }
+    if (stream.url && stream.url.toLowerCase().startsWith('magnet:')) {
+      return stream.url;
+    }
+    if (stream.infoHash) {
+      return `magnet:?xt=urn:btih:${stream.infoHash}`;
+    }
+    return undefined;
+  }
+
+  private buildResolveUrl(token: string, magnet: string, context?: StreamContext): string {
+    const encodedToken = encodeURIComponent(token);
+    const encodedMagnet = encodeURIComponent(magnet);
+    const contextValue = StreamService.encodeStreamContext(context);
+    const querySuffix = contextValue ? `?ctx=${contextValue}` : '';
+    return `${this.resolveBaseUrl}/resolve/${encodedToken}/${encodedMagnet}${querySuffix}`;
   }
 }
