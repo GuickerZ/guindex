@@ -42,7 +42,7 @@ type TorrentLike = Record<string, unknown>;
 
 const MAX_STREAMS = 60;
 const EPISODIC_HINT_REGEX =
-  /(S[0-9]{1,3}(E[0-9]{1,3})?|S[0-9]{1,3}[._ -]?(19|20)[0-9]{2}|[0-9]+x[0-9]+|temporada|season|episódio|episodio|episode|serie|série|ep[0-9]+|completa)/i;
+  /(S[0-9]{1,3}(E[0-9]{1,3})?|S[0-9]{1,3}[._ -]?(19|20)[0-9]{2}|[0-9]+x[0-9]+|temporadas?|season|epis[oó]dios?|epis[oó]dio|episode|serie|série|minissérie|mini[\s-]?serie|ep[0-9]+|cap[ií]tulo|capitulo|completa|complete|collection|box\s*set|pack)/i;
 
 const LANGUAGE_FLAG_MAP: Record<string, string> = {
   portugues: '🇧🇷',
@@ -500,23 +500,69 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
   }
 
   private hasEpisodePattern(torrent: TorrentLike): boolean {
-    const titles = this.collectTorrentTitles(torrent);
-    if (titles.some((title) => EPISODIC_HINT_REGEX.test(title))) {
+    if (
+      this.extractSeason(torrent) !== undefined ||
+      this.extractEpisode(torrent) !== undefined ||
+      (this.extractEpisodeList(torrent)?.length ?? 0) > 0
+    ) {
       return true;
     }
 
-    const record = torrent as Record<string, unknown>;
-    const extraFields = [
-      record.description,
-      record.details,
-      record.tagline,
-      record.summary,
-      record.plot,
-    ];
+    const metadataStrings = this.collectEpisodeMetadataStrings(torrent);
+    return metadataStrings.some((value) => EPISODIC_HINT_REGEX.test(value));
+  }
 
-    return extraFields.some(
-      (value) => typeof value === 'string' && EPISODIC_HINT_REGEX.test(value),
-    );
+  private collectEpisodeMetadataStrings(torrent: TorrentLike): string[] {
+    const record = torrent as Record<string, unknown>;
+    const strings: string[] = [];
+
+    const pushValue = (value: unknown) => {
+      if (typeof value !== 'string') {
+        return;
+      }
+
+      const normalized = this.normalizeEpisodeMetadata(value);
+      if (normalized) {
+        strings.push(normalized);
+      }
+    };
+
+    pushValue(record.title);
+    pushValue(record.original_title);
+    pushValue(record.description);
+    pushValue(record.summary);
+    pushValue(record.plot);
+    pushValue(record.synopsis);
+    pushValue(record.details);
+    pushValue(record.slug);
+    pushValue(record.category);
+    pushValue(record.subcategory);
+
+    const tags = (record.tags as unknown) || (record.categories as unknown);
+    if (Array.isArray(tags)) {
+      tags.forEach(pushValue);
+    }
+
+    return strings;
+  }
+
+  private normalizeEpisodeMetadata(value: string): string | undefined {
+    let normalized = value;
+    try {
+      normalized = decodeURIComponent(value);
+    } catch {
+      normalized = value;
+    }
+
+    normalized = normalized.replace(/https?:\/\/[^/]+/gi, ' ');
+    normalized = normalized.replace(/[/_.\-+]/g, ' ');
+    normalized = normalized.replace(/\s+/g, ' ').trim();
+
+    if (!normalized) {
+      return undefined;
+    }
+
+    return normalized.toLowerCase();
   }
 
   private extractImdb(torrent: TorrentLike): string | undefined {
