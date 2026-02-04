@@ -157,18 +157,19 @@ export class TorboxClient {
   }
 
   async requestDownloadLink(params: { torrentId: number; fileId?: number; userIp?: string }): Promise<string> {
-    const data = await this.get<{ link?: string }>('/v1/api/torrents/requestdl', {
-      token: this.token,
-      torrent_id: params.torrentId,
-      file_id: params.fileId ?? '',
-      user_ip: params.userIp ?? '',
-      zip_link: false
-    });
-    const link = (data as any)?.link ?? (data as any);
-    if (typeof link !== 'string') {
-      throw new Error('TorBox requestDownloadLink returned invalid payload');
+    const url = new URL(this.baseUrl + '/v1/api/torrents/requestdl');
+    url.searchParams.set('token', this.token);
+    url.searchParams.set('torrent_id', String(params.torrentId));
+    if (params.fileId !== undefined) url.searchParams.set('file_id', String(params.fileId));
+    if (params.userIp) url.searchParams.set('user_ip', params.userIp);
+    url.searchParams.set('zip_link', 'false');
+
+    const res = await request(url.toString(), { headers: this.headers() });
+    const text = await res.body.text();
+    if (res.statusCode >= 400 || !text) {
+      throw new Error(`TorBox requestDownloadLink failed: ${res.statusCode} ${text}`);
     }
-    return link;
+    return text.trim();
   }
 
   async checkWebDlCached(hashes: string[]): Promise<CheckCachedItem[]> {
@@ -189,17 +190,18 @@ export class TorboxClient {
   }
 
   async requestWebDlLink(params: { webId: number; fileId?: number; userIp?: string }): Promise<string> {
-    const data = await this.get<{ link?: string }>('/v1/api/webdl/requestdl', {
-      token: this.token,
-      web_id: params.webId,
-      file_id: params.fileId ?? '',
-      user_ip: params.userIp ?? '',
-      zip_link: false
-    });
-    const link = (data as any)?.link ?? (data as any);
-    if (typeof link !== 'string') {
-      throw new Error('TorBox requestWebDlLink returned invalid payload');
+    const url = new URL(this.baseUrl + '/v1/api/webdl/requestdl');
+    url.searchParams.set('token', this.token);
+    url.searchParams.set('web_id', String(params.webId));
+    if (params.fileId !== undefined) url.searchParams.set('file_id', String(params.fileId));
+    if (params.userIp) url.searchParams.set('user_ip', params.userIp);
+    url.searchParams.set('zip_link', 'false');
+
+    const res = await request(url.toString(), { headers: this.headers() });
+    const text = await res.body.text();
+    if (res.statusCode >= 400 || !text) {
+      throw new Error(`TorBox requestWebDlLink failed: ${res.statusCode} ${text}`);
     }
-    return link;
+    return text.trim();
   }
 }

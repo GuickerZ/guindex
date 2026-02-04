@@ -90,6 +90,15 @@ export class TorboxService {
 
       const attempt = async () => {
         const info = await this.client.getTorrent(torrent_id);
+        console.debug('[TorBox] torrent state', {
+          id: torrent_id,
+          state: info.download_state,
+          present: info.download_present,
+          finished: info.download_finished,
+          files: info.files?.length,
+          progress: (info as any).progress,
+          availability: (info as any).availability
+        });
         const ready = this.isReady(info);
         const file = this.selectBestFile(info.files || [], context);
         if (!file?.id) return undefined;
@@ -258,6 +267,7 @@ export class TorboxService {
     if (!waitUrl) {
       throw new Error('TORBOX_WAIT_VIDEO_URL is required for TorBox placeholder');
     }
+    console.debug('[TorBox] returning wait video', waitUrl);
     return { url: waitUrl, ready: false };
   }
 }
