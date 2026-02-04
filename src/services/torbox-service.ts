@@ -101,13 +101,45 @@ export class TorboxService {
         });
         const ready = this.isReady(info);
         const file = this.selectBestFile(info.files || [], context);
-        if (!file?.id) return undefined;
-        if (ready) {
-          const link = await this.safeCall(() =>
-            this.client.requestDownloadLink({ torrentId: torrent_id, fileId: file.id })
+        const fileId = file?.id ?? file?.id === 0 ? file.id : undefined;
+
+        const tryLinks = async (): Promise<string | undefined> => {
+          // 1) with fileId (if available)
+          if (fileId !== undefined) {
+            const link = await this.safeCall(() =>
+              this.client.requestDownloadLink({ torrentId: torrent_id, fileId })
+            );
+            if (link) return link;
+          }
+          // 2) without fileId
+          const linkNoId = await this.safeCall(() =>
+            this.client.requestDownloadLink({ torrentId: torrent_id })
           );
+          if (linkNoId) return linkNoId;
+          // 3) iterate other files by size desc
+          const filesBySize = [...(info.files || [])]
+            .filter((f) => f && f.id !== undefined)
+            .sort((a, b) => (b.size ?? 0) - (a.size ?? 0));
+          for (const f of filesBySize) {
+            const link = await this.safeCall(() =>
+              this.client.requestDownloadLink({ torrentId: torrent_id, fileId: f.id })
+            );
+            if (link) return link;
+          }
+          return undefined;
+        };
+
+        if (ready) {
+          const link = await tryLinks();
           if (link) {
-            return { url: link, ready: true, fileName: file.name, size: file.size };
+            const chosen = file ?? info.files?.[0];
+            console.debug('[TorBox] link acquired', {
+              torrentId: torrent_id,
+              fileId: chosen?.id,
+              name: chosen?.name || chosen?.short_name,
+              size: chosen?.size
+            });
+            return { url: link, ready: true, fileName: chosen?.name, size: chosen?.size };
           }
         }
         return undefined;
@@ -120,8 +152,10 @@ export class TorboxService {
         if (res) return res;
       }
 
+      console.debug('[TorBox] no link after attempts, returning wait video');
       return this.placeholderResult();
-    } catch {
+    } catch (err) {
+      console.debug('[TorBox] error in processMagnetToDirectUrl', err);
       return this.placeholderResult();
     }
   }

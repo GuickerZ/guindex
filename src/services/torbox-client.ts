@@ -165,11 +165,22 @@ export class TorboxClient {
     url.searchParams.set('zip_link', 'false');
 
     const res = await request(url.toString(), { headers: this.headers() });
+    const location = res.headers['location'];
     const text = await res.body.text();
-    if (res.statusCode >= 400 || !text) {
-      throw new Error(`TorBox requestDownloadLink failed: ${res.statusCode} ${text}`);
+    const bodyPreview = (text ?? '').slice(0, 200);
+    console.debug('[TorBox] requestDownloadLink', {
+      status: res.statusCode,
+      torrentId: params.torrentId,
+      fileId: params.fileId,
+      location,
+      bodyPreview
+    });
+
+    const linkCandidate = location || text?.trim();
+    if (res.statusCode >= 400 || !linkCandidate) {
+      throw new Error(`TorBox requestDownloadLink failed: ${res.statusCode} ${bodyPreview}`);
     }
-    return text.trim();
+    return this.normalizeLink(linkCandidate);
   }
 
   async checkWebDlCached(hashes: string[]): Promise<CheckCachedItem[]> {
@@ -198,10 +209,33 @@ export class TorboxClient {
     url.searchParams.set('zip_link', 'false');
 
     const res = await request(url.toString(), { headers: this.headers() });
+    const location = res.headers['location'];
     const text = await res.body.text();
-    if (res.statusCode >= 400 || !text) {
-      throw new Error(`TorBox requestWebDlLink failed: ${res.statusCode} ${text}`);
+    const bodyPreview = (text ?? '').slice(0, 200);
+    console.debug('[TorBox] requestWebDlLink', {
+      status: res.statusCode,
+      webId: params.webId,
+      fileId: params.fileId,
+      location,
+      bodyPreview
+    });
+
+    const linkCandidate = location || text?.trim();
+    if (res.statusCode >= 400 || !linkCandidate) {
+      throw new Error(`TorBox requestWebDlLink failed: ${res.statusCode} ${bodyPreview}`);
     }
-    return text.trim();
+    return this.normalizeLink(linkCandidate);
+  }
+
+  private normalizeLink(link: string): string {
+    if (!link) throw new Error('Empty link from TorBox');
+    let normalized = link.trim();
+    if (normalized.startsWith('//')) {
+      normalized = 'https:' + normalized;
+    }
+    if (!/^https?:\/\//i.test(normalized)) {
+      throw new Error(`Invalid link format from TorBox: ${normalized}`);
+    }
+    return normalized;
   }
 }
