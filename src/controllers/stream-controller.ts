@@ -14,12 +14,13 @@ import { TorboxService } from '../services/torbox-service.js';
 export class StreamController {
   private config = ConfigService.loadConfig();
   private readonly resolveBaseUrl = this.config.baseUrl;
+  private readonly torboxStreamLimit = this.config.torboxStreamLimit ?? 12;
 
   async handleStreamRequest(args: StreamRequest): Promise<StreamResponse> {
     const { type, id, extra } = args;
 
     try {
-      console.debug(`Processing stream request: ${type}/${id}`);
+      console.info(`Processing stream request: ${type}/${id}`);
       
       // Fetch streams from all configured sources
       const debridSelection = StreamService.resolveDebridSelection({
@@ -33,7 +34,6 @@ export class StreamController {
       });
       const selectedProvider = debridSelection.provider;
       const selectedToken = debridSelection.token;
-      const useStremthru = Boolean(this.stremthruBaseUrl && selectedToken);
       const fetchOptions = selectedToken
         ? {
             debridProvider: selectedProvider,
@@ -55,9 +55,11 @@ export class StreamController {
         return { streams: [] };
       }
 
-      console.debug(`Found ${processableStreams.length} streams with magnet links`);
+      console.debug(`Found ${processableStreams.length} processable streams`);
 
+      const availabilityStart = Date.now();
       await this.ensureDebridAvailability(processableStreams, selectedProvider, selectedToken);
+      console.debug(`Availability check took ${Date.now() - availabilityStart}ms`);
 
       if (!selectedToken) {
         console.debug('No debrid token provided, returning magnet fallback streams');
@@ -67,7 +69,7 @@ export class StreamController {
         .map((stream) => {
           const magnet = this.extractStreamMagnet(stream);
           const isHttpStream = stream.url?.startsWith('https://');
-          const isCached = stream.cached ?? false;
+          const isCached = stream.cached === true;
 
           const commonOptions = {
             fallbackMagnet: magnet,
@@ -126,7 +128,7 @@ export class StreamController {
             const bSize = (b.behaviorHints as any)?.videoSize ?? 0;
             return bSize - aSize;
           })
-          .slice(0, 12);
+          .slice(0, this.torboxStreamLimit);
       }
 
       streamMetadata.sort((a, b) => {

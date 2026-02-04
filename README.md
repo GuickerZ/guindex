@@ -1,236 +1,65 @@
 # Brazuca RD - Stremio Addon
 
-A Stremio addon that acts as a proxy for torrent-based addons, processing magnet links through Real-Debrid for direct streaming.
+Addon proxy that sends magnets/HTTP links through Real-Debrid or TorBox, returning direct playable URLs. Tuned for Vercel and ready to drop into AIOStreams.
 
-## 🎯 Features
+## Features
+- Real-Debrid and TorBox support (torrent + WebDL), with real cache detection.
+- Fast cached playback: cached torrents usually resolve in ~1s; wait-video only when not ready.
+- Lean payload: trims unused fields for TorBox and limits stream count (default 12).
+- Placeholder MP4 for downloading state (configurable).
+- Works on Vercel/serverless; no external backend required.
 
-- **Real-Debrid & TorBox**: Magnet processing through RD or TorBox (with instant cache detection)
-- **TorBox WebDL**: Direct HTTP links are sent to TorBox WebDL; returns placeholder while downloading
-- **Multiple Sources**: Supports multiple Stremio addon sources (starting with Brazuca Torrents)
-- **Deferred Processing**: Only processes torrents/links when user actually plays the stream
-- **Placeholder Video**: Shows downloading status while the debrid provider processes the item
-- **Clean Architecture**: Well-organized codebase with models, services, controllers, and routes
-- **Hot Reload**: Development server with automatic reloading
-- **Production Ready**: Configurable base URL for cloud deployment
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Node.js 18+ (recommended)
-- Real-Debrid account and API token
-- Stremio client
-
-### Installation
-
-1. **Clone and setup**:
+## Quick start
+1) Install dependencies  
    ```bash
-   git clone https://github.com/andremoreirasmo/brazuca-rd.git
-   cd brazuca-rd
    npm install
    ```
-
-2. **Configure environment**:
+2) Environment (set at deploy or locally)  
    ```bash
-   # Copy example configuration
-   cp .envrc.example .envrc
-   
-   # Edit with your settings
-   nano .envrc
-   
-   # Load environment (if using direnv)
-   direnv allow
-   ```
-
-3. **Environment Variables**:
-   ```bash
-   # Server Configuration
+   export BASE_URL=https://your-domain.vercel.app   # required in prod
    export PORT=7000
    export LOG_LEVEL=info
-   
-   # Production URL (optional)
-   export BASE_URL=https://your-domain.com
+   export TORBOX_WAIT_VIDEO_URL=https://aiostreams.elfhosted.com/static/downloading.mp4
+   export TORBOX_STREAM_LIMIT=12
+   # optional defaults: REALDEBRID_TOKEN, TORBOX_TOKEN
    ```
-
-### Development
-
-```bash
-# Start development server with hot reload
-npm run dev
-
-# Build and start production
-npm run build && npm start
-```
-
-### Usage in Stremio
-
-1. **Install addon**: `http://localhost:7000/manifest.json`
-2. **Configure**: Pass Real-Debrid token via:
-   - Query parameter: `?realdebridToken=YOUR_TOKEN`
-   - Header: `x-rd-token: YOUR_TOKEN`
-
-## 🏗️ Architecture
-
-### Project Structure
-
-```
-src/
-├── models/           # Data models and interfaces
-├── services/         # Business logic services
-├── controllers/      # Request handling controllers
-├── routes/          # API route definitions
-├── config/          # Configuration files
-└── server.ts        # Application entry point
-```
-
-### Key Components
-
-- **ConfigService**: Manages application configuration
-- **SourceService**: Orchestrates multiple source providers
-- **RealDebridService**: Handles Real-Debrid API interactions
-- **StreamController**: Processes stream requests
-- **ConfigController**: Manages addon manifest and configuration
-
-### Source Providers
-
-The addon uses a flexible provider system:
-
-- **StremioAddonProvider**: Fetches streams from other Stremio addons
-- **BaseSourceProvider**: Abstract base class for all providers
-- **Configurable Sources**: Easy to add new sources in `config/sources.ts`
-
-## 🔧 Configuration
-
-### Adding New Sources
-
-Edit `src/config/sources.ts`:
-
-```typescript
-import { StremioAddonProvider } from '../services/stremio-addon-provider.js';
-
-export const SOURCES = [
-  new StremioAddonProvider('Brazuca', 'https://94c8cb9f702d-brazuca-torrents.baby-beamup.club'),
-  new StremioAddonProvider('NewSource', 'https://new-source-url.com'),
-];
-```
-
-### Debrid Tokens & TorBox Wait Video
-
-Provide tokens per request:
-
-- **Real-Debrid**: `?realdebridToken=TOKEN` or header `x-rd-token`
-- **TorBox**: `?torboxToken=TOKEN` or header `x-tb-token`
-- **Provider selector**: `?debridProvider=torbox|realdebrid`
-- **TorBox wait video**: set `TORBOX_WAIT_VIDEO_URL` to an external MP4 (ex.: `https://aiostreams.elfhosted.com/static/downloading.mp4`) used when the torrent ainda está baixando.
-2. **Header**: `x-rd-token: TOKEN`
-3. **Stremio Configuration**: Token is passed through Stremio's addon system
-
-## 🌐 Deployment
-
-### Cloud Deployment Ready ✅
-
-The addon is production-ready with:
-
-- **Environment Configuration**: Uses `.envrc` for environment variables
-- **Dynamic Base URL**: Configurable `BASE_URL` for production
-- **Static File Serving**: Serves placeholder videos and assets
-- **Error Handling**: Comprehensive error handling and logging
-- **CORS Support**: Cross-origin resource sharing enabled
-
-### Deployment Steps
-
-1. **Set Production URL**:
+3) Run locally  
    ```bash
-   export BASE_URL=https://your-domain.com
+   npm run dev   # or npm start after build
    ```
+4) Install in Stremio  
+   - `http://localhost:7000/manifest.json?debridProvider=torbox&torboxToken=TOKEN`  
+   - or `...debridProvider=realdebrid&realdebridToken=TOKEN`
 
-2. **Build Application**:
-   ```bash
-   npm run build
-   ```
+## AIOStreams quick setup
+Copy one of these URLs (replace TOKEN) into AIOStreams:
+- TorBox: `https://your-domain.vercel.app/manifest.json?debridProvider=torbox&torboxToken=TOKEN`
+- Real-Debrid: `https://your-domain.vercel.app/manifest.json?debridProvider=realdebrid&realdebridToken=TOKEN`
 
-3. **Deploy**:
-   - Upload `dist/` folder to your server
-   - Install dependencies: `npm install --production`
-   - Start: `npm start`
+Tokens can also be passed via headers: `x-tb-token`, `x-rd-token`, `x-debrid-provider`.
 
-### Recommended Platforms
+## Routes
+- `GET /manifest.json` (+ token variants) – Stremio manifest
+- `GET /configure` – helper page with ready-to-copy URLs
+- `GET /stream/:type/:id.json` – stream discovery
+- `GET|HEAD /resolve` – resolves magnet/URL via chosen debrid, returns 302 to direct link or wait video
+- `GET /placeholder/downloading.mp4` – bundled placeholder (fallback if you don’t set an external one)
+- `GET /debug` – shows loaded config
 
-- **Vercel**: Easy deployment with automatic builds
-- **Railway**: Simple Node.js deployment
-- **DigitalOcean App Platform**: Managed hosting
-- **AWS Lambda**: Serverless deployment
-- **Docker**: Containerized deployment
+## Behavior notes
+- `[TB⚡]` only when TorBox reports cached/present and a direct link was obtained; `[TB…]` while downloading.
+- TorBox streams sorted by ready desc, size desc; capped by `TORBOX_STREAM_LIMIT` (default 12).
+- Cached probing uses `checkcached` with file listing and is memoized for 5 minutes.
+- Request timeouts to TorBox are short (4s) and retries are limited (0/1/2.5s) to keep latency low.
 
-### Docker Support
+## Build/test
+- Type-check: `npx tsc`
+- Production build: `npm run build`
 
-Create a `Dockerfile`:
+## Tokens
+- Query: `?torboxToken=...` or `?realdebridToken=...`
+- Headers: `x-tb-token`, `x-rd-token`
+- Provider selector: `?debridProvider=torbox|realdebrid`
 
-```dockerfile
-FROM node:18-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-COPY dist/ ./dist/
-COPY public/ ./public/
-EXPOSE 7000
-CMD ["npm", "start"]
-```
-
-## 📝 API Endpoints
-
-- `GET /manifest.json` - Addon manifest
-- `GET /configure` - Configuration page
-- `GET /stream/:type/:id.json` - Stream discovery
-- `GET /resolve/:token/:magnet` - Real-Debrid processing
-- `GET /placeholder/downloading.mp4` - Placeholder video
-
-## 🔍 Development
-
-### Scripts
-
-- `npm run dev` - Development server with hot reload
-- `npm run build` - Build for production
-- `npm start` - Start production server
-- `npm run lint` - Run ESLint
-
-### Hot Reload
-
-The development server automatically reloads when files change, making development efficient.
-
-### Adding Features
-
-1. **New Source Provider**: Extend `BaseSourceProvider`
-2. **New Service**: Add to `services/` directory
-3. **New Route**: Add to `routes/routes.ts`
-4. **New Model**: Add to `models/` directory
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
-
-## 📄 License
-
-This project is licensed under the MIT License.
-
-## 🙏 Credits
-
-- **Brazuca Torrents**: Original Stremio addon that inspired this project
-- **Real-Debrid**: Premium debrid service for torrent processing
-- **Stremio**: Media center platform
-
-## 🆘 Support
-
-For issues and questions:
-
-1. Check the [Issues](https://github.com/andremoreirasmo/brazuca-rd/issues) page
-2. Create a new issue with detailed information
-3. Include logs and configuration details
-
----
-
-**Note**: This addon requires a Real-Debrid subscription to function. Users must provide their own Real-Debrid API tokens.
+## Deployment
+Deploy to Vercel with `BASE_URL` set to the deployed domain. Public placeholder video is recommended via `TORBOX_WAIT_VIDEO_URL`. No external Go/StremThru backend is required.

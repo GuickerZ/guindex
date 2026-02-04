@@ -59,12 +59,10 @@ export class TorboxService {
       const cachedSet = new Set<string>();
       for (const item of payload) {
         const h = (item.hash ?? '').toLowerCase();
-        if (h && item.files && item.files.length > 0) {
+        const hasFiles = !!item.files && item.files.length > 0;
+        const flaggedCached = (item as any).cached === true;
+        if (h && (hasFiles || flaggedCached)) {
           cachedSet.add(h);
-          continue;
-        }
-        if (h) {
-          cachedSet.add(h); // treat as cached if returned
         }
       }
       this.updateAvailabilityCache(toFetch, cachedSet, now);

@@ -66,6 +66,7 @@ export class TorboxClient {
   private readonly baseUrl: string;
   private readonly token: string;
   private readonly userAgent: string;
+  private readonly requestTimeout = 4000; // ms
 
   constructor(options: TorboxClientOptions) {
     this.token = options.token;
@@ -94,7 +95,11 @@ export class TorboxClient {
       }
     }
 
-    const res = await request(url.toString(), { headers: this.headers() });
+    const res = await request(url.toString(), {
+      headers: this.headers(),
+      headersTimeout: this.requestTimeout,
+      bodyTimeout: this.requestTimeout
+    });
     const bodyText = await res.body.text();
 
     if (res.statusCode >= 400) {
@@ -121,7 +126,9 @@ export class TorboxClient {
         ...this.headers(),
         'Content-Type': 'application/x-www-form-urlencoded'
       },
-      body: formData.toString()
+      body: formData.toString(),
+      headersTimeout: this.requestTimeout,
+      bodyTimeout: this.requestTimeout
     });
 
     const bodyText = await res.body.text();
@@ -164,7 +171,12 @@ export class TorboxClient {
     if (params.userIp) url.searchParams.set('user_ip', params.userIp);
     url.searchParams.set('zip_link', 'false');
 
-    const res = await request(url.toString(), { headers: this.headers() });
+    const res = await request(url.toString(), {
+      headers: this.headers(),
+      maxRedirections: 2,
+      headersTimeout: this.requestTimeout,
+      bodyTimeout: this.requestTimeout
+    });
     const location = res.headers['location'];
     const text = await res.body.text();
     const bodyPreview = (text ?? '').slice(0, 200);
@@ -229,7 +241,11 @@ export class TorboxClient {
     if (params.userIp) url.searchParams.set('user_ip', params.userIp);
     url.searchParams.set('zip_link', 'false');
 
-    const res = await request(url.toString(), { headers: this.headers() });
+    const res = await request(url.toString(), {
+      headers: this.headers(),
+      headersTimeout: this.requestTimeout,
+      bodyTimeout: this.requestTimeout
+    });
     const location = res.headers['location'];
     const text = await res.body.text();
     const bodyPreview = (text ?? '').slice(0, 200);

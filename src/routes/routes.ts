@@ -246,6 +246,7 @@ export function setupRoutes() {
       method: ['GET', 'HEAD'],
       url,
       handler: async (req, reply) => {
+        const started = Date.now();
         if (req.method === 'HEAD') {
           respondProbeSuccess(reply);
           return;
@@ -266,6 +267,7 @@ export function setupRoutes() {
             return;
           }
           await handleResolveRequest(reply, token, undefined, originalUrl, provider, linkType, ctx);
+          logger.info({ route: 'resolve', provider, linkType, durMs: Date.now() - started }, 'resolve handled');
           return;
         }
 
@@ -275,6 +277,7 @@ export function setupRoutes() {
         }
 
         await handleResolveRequest(reply, token, magnet, undefined, provider, linkType, ctx);
+        logger.info({ route: 'resolve', provider, linkType, durMs: Date.now() - started }, 'resolve handled');
       }
     });
   };

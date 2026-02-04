@@ -15,6 +15,10 @@ export class ConfigService {
     const waitVideoUrl =
       ConfigService.normalizeBaseUrl(process.env.TORBOX_WAIT_VIDEO_URL) ||
       ConfigService.normalizeBaseUrl('https://aiostreams.elfhosted.com/static/downloading.mp4');
+    const torboxStreamLimit =
+      Number(process.env.TORBOX_STREAM_LIMIT) && Number(process.env.TORBOX_STREAM_LIMIT) > 0
+        ? Number(process.env.TORBOX_STREAM_LIMIT)
+        : 12;
 
     // Debug logging for environment variables
     console.log('Environment variables:');
@@ -28,7 +32,8 @@ export class ConfigService {
       port,
       logLevel,
       baseUrl: normalizedBaseUrl,
-      waitVideoUrl
+      waitVideoUrl,
+      torboxStreamLimit
     };
 
     console.log('Final config:', config);
