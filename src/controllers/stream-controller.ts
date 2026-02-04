@@ -33,6 +33,7 @@ export class StreamController {
       });
       const selectedProvider = debridSelection.provider;
       const selectedToken = debridSelection.token;
+      const useStremthru = Boolean(this.stremthruBaseUrl && selectedToken);
       const fetchOptions = selectedToken
         ? {
             debridProvider: selectedProvider,
