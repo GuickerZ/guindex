@@ -30,19 +30,19 @@ export class StreamService {
       debridProvider === 'torbox' ? (isReady ? `${providerLabel}⚡` : providerLabel) : isReady ? `${providerLabel}+` : providerLabel;
     const baseName = sourceStream.name || `[Brazuca Debrid] ${fallbackTitle}`;
 
+    const displayName =
+      debridProvider === 'torbox'
+        ? `[${readyLabel}] ${StreamService.buildTorboxName(sourceStream, fallbackTitle)}`
+        : `[${readyLabel}] ${baseName}`;
     const metadata: StremioStream = {
-      name: `[${readyLabel}] ${baseName}`,
+      name: displayName,
       title: fallbackTitle,
       url
     };
 
     const behaviorHints: StremioStreamBehaviorHints = {};
     const shouldForceNotWebReady = options?.forceNotWebReady ?? true;
-    if (shouldForceNotWebReady) {
-      behaviorHints.notWebReady = true;
-    }
     if (debridProvider === 'torbox') {
-      behaviorHints.torboxReady = isReady;
       const bingeGroup = StreamService.buildBingeGroup(sourceStream, debridProvider);
       if (bingeGroup) {
         behaviorHints.bingeGroup = bingeGroup;
@@ -54,9 +54,12 @@ export class StreamService {
         behaviorHints.videoSize = sourceStream.size;
       }
     } else {
+      if (shouldForceNotWebReady) {
+        behaviorHints.notWebReady = true;
+      }
       behaviorHints.realDebridReady = isReady;
     }
-    if (options?.fallbackMagnet) {
+    if (options?.fallbackMagnet && debridProvider !== 'torbox') {
       behaviorHints.fallbackMagnet = options.fallbackMagnet;
     }
     if (Object.keys(behaviorHints).length > 0) {
@@ -90,6 +93,21 @@ export class StreamService {
     }
 
     return `${source.toLowerCase()}|${provider}|${hash.toLowerCase()}`;
+  }
+
+  private static buildTorboxName(stream: SourceStream, fallbackTitle: string): string {
+    const source = stream.source?.trim();
+    const quality = stream.quality?.trim();
+    if (source && quality) {
+      return `${source} ${quality}`;
+    }
+    if (source) {
+      return source;
+    }
+    if (quality) {
+      return quality;
+    }
+    return fallbackTitle;
   }
 
   private static buildTorboxDescription(stream: SourceStream): string | undefined {

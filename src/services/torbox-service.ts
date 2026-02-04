@@ -221,29 +221,33 @@ export class TorboxService {
   }
 
   async processMagnetToDirectUrl(magnet: string, context?: StreamContext): Promise<string> {
-    const { id: torrentId } = await this.addMagnet(magnet);
-    const torrentInfo = await this.getTorrentInfo(torrentId);
-    const files = this.extractFiles(torrentInfo);
-    if (files.length === 0) {
-      throw new Error(`No files found in torrent: ${torrentId}`);
-    }
+    try {
+      const { id: torrentId } = await this.addMagnet(magnet);
+      const torrentInfo = await this.getTorrentInfo(torrentId);
+      const files = this.extractFiles(torrentInfo);
+      if (files.length === 0) {
+        return this.createPlaceholderUrl();
+      }
 
-    const selectedFile = this.selectBestFile(files, context);
-    if (selectedFile?.id !== undefined) {
-      await this.selectFiles(torrentId, String(selectedFile.id));
-    }
+      const selectedFile = this.selectBestFile(files, context);
+      if (selectedFile?.id !== undefined) {
+        await this.selectFiles(torrentId, String(selectedFile.id));
+      }
 
-    const refreshedInfo = await this.getTorrentInfo(torrentId);
-    const directUrl = this.extractDirectUrl(refreshedInfo);
-    if (directUrl) {
-      return directUrl;
-    }
+      const refreshedInfo = await this.getTorrentInfo(torrentId);
+      const directUrl = this.extractDirectUrl(refreshedInfo);
+      if (directUrl) {
+        return directUrl;
+      }
 
-    await new Promise((resolve) => setTimeout(resolve, 5000));
-    const retryInfo = await this.getTorrentInfo(torrentId);
-    const retryUrl = this.extractDirectUrl(retryInfo);
-    if (retryUrl) {
-      return retryUrl;
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+      const retryInfo = await this.getTorrentInfo(torrentId);
+      const retryUrl = this.extractDirectUrl(retryInfo);
+      if (retryUrl) {
+        return retryUrl;
+      }
+    } catch {
+      // fall through to placeholder
     }
 
     return this.createPlaceholderUrl();
