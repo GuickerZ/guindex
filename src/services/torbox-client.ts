@@ -168,15 +168,36 @@ export class TorboxClient {
     const location = res.headers['location'];
     const text = await res.body.text();
     const bodyPreview = (text ?? '').slice(0, 200);
-    console.debug('[TorBox] requestDownloadLink', {
+
+    let parsedLink: string | undefined;
+    if (text?.trim().startsWith('{')) {
+      try {
+        const json = JSON.parse(text);
+        parsedLink = json?.data || json?.link || json?.download;
+        console.debug('[TorBox] requestDownloadLink JSON', {
+          status: res.statusCode,
+          torrentId: params.torrentId,
+          fileId: params.fileId,
+          success: json?.success,
+          error: json?.error,
+          detail: json?.detail,
+          link: parsedLink
+        });
+      } catch (e) {
+        console.debug('[TorBox] requestDownloadLink JSON parse error', e);
+      }
+    }
+
+    const linkCandidate = parsedLink || location || text?.trim();
+    console.debug('[TorBox] requestDownloadLink raw', {
       status: res.statusCode,
       torrentId: params.torrentId,
       fileId: params.fileId,
       location,
+      linkCandidate,
       bodyPreview
     });
 
-    const linkCandidate = location || text?.trim();
     if (res.statusCode >= 400 || !linkCandidate) {
       throw new Error(`TorBox requestDownloadLink failed: ${res.statusCode} ${bodyPreview}`);
     }
@@ -212,15 +233,36 @@ export class TorboxClient {
     const location = res.headers['location'];
     const text = await res.body.text();
     const bodyPreview = (text ?? '').slice(0, 200);
-    console.debug('[TorBox] requestWebDlLink', {
+
+    let parsedLink: string | undefined;
+    if (text?.trim().startsWith('{')) {
+      try {
+        const json = JSON.parse(text);
+        parsedLink = json?.data || json?.link || json?.download;
+        console.debug('[TorBox] requestWebDlLink JSON', {
+          status: res.statusCode,
+          webId: params.webId,
+          fileId: params.fileId,
+          success: json?.success,
+          error: json?.error,
+          detail: json?.detail,
+          link: parsedLink
+        });
+      } catch (e) {
+        console.debug('[TorBox] requestWebDlLink JSON parse error', e);
+      }
+    }
+
+    const linkCandidate = parsedLink || location || text?.trim();
+    console.debug('[TorBox] requestWebDlLink raw', {
       status: res.statusCode,
       webId: params.webId,
       fileId: params.fileId,
       location,
+      linkCandidate,
       bodyPreview
     });
 
-    const linkCandidate = location || text?.trim();
     if (res.statusCode >= 400 || !linkCandidate) {
       throw new Error(`TorBox requestWebDlLink failed: ${res.statusCode} ${bodyPreview}`);
     }

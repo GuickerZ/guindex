@@ -142,6 +142,9 @@ export class TorboxService {
             return { url: link, ready: true, fileName: chosen?.name, size: chosen?.size };
           }
         }
+        if (ready) {
+          console.debug('[TorBox] ready but no link from requestdl');
+        }
         return undefined;
       };
 
