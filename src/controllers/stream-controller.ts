@@ -58,11 +58,20 @@ export class StreamController {
 
       await this.ensureDebridAvailability(processableStreams, selectedProvider, selectedToken);
 
+      // For TorBox with token, keep only cached torrents (avoid placeholder issues)
+      const filteredStreams =
+        selectedProvider === 'torbox' && selectedToken
+          ? processableStreams.filter(
+              (s) =>
+                s.cached === true || (s.url && s.url.startsWith('https://')) // keep direct HTTP (WebDL) if present
+            )
+          : processableStreams;
+
       if (!selectedToken) {
         console.debug('No debrid token provided, returning magnet fallback streams');
       }
 
-      const streamMetadata: StremioStream[] = processableStreams
+      const streamMetadata: StremioStream[] = filteredStreams
         .map((stream) => {
           const magnet = this.extractStreamMagnet(stream);
           const isHttpStream = stream.url?.startsWith('https://');
@@ -101,7 +110,15 @@ export class StreamController {
             originalUrl: isHttpStream ? stream.url : undefined
           });
 
-          return StreamService.createStreamMetadata(stream, resolveUrl, commonOptions);
+          const meta = StreamService.createStreamMetadata(stream, resolveUrl, commonOptions);
+          if (selectedProvider === 'torbox') {
+            delete meta.externalUrl;
+            delete meta.seeders;
+            delete meta.quality;
+            delete meta.releaseGroup;
+            delete meta.size;
+          }
+          return meta;
         })
         .filter((stream): stream is StremioStream => Boolean(stream));
 

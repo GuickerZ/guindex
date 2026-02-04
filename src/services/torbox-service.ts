@@ -209,6 +209,7 @@ export class TorboxService {
 
   private placeholderResult(): TorboxDirectResult {
     const config = ConfigService.loadConfig();
-    return { url: `${config.baseUrl}/placeholder/downloading.mp4`, ready: false };
+    // fallback to base url (will 404) but avoid non-existing downloading.mp4 complaints
+    return { url: `${config.baseUrl}/`, ready: false };
   }
 }
