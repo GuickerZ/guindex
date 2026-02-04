@@ -1,581 +1,205 @@
 /**
- * Torbox Service
+ * TorBox Service built on top of TorboxClient.
+ * Handles both torrents (magnet) and WebDL (HTTP) flows.
  */
 
-import { request } from 'undici';
 import { ConfigService } from './config-service.js';
 import type { StreamContext } from '../models/source-model.js';
+import { TorboxClient, type TorboxFile, type TorboxTorrent, type TorboxWebDl } from './torbox-client.js';
 
-type TorboxPayload = Record<string, unknown>;
+type AvailabilityCacheEntry = { cached: boolean; expires: number };
 
-interface TorboxInstantCacheEntry {
-  cached: boolean;
-  expires: number;
+export interface TorboxDirectResult {
+  url: string;
+  ready: boolean;
+  fileName?: string;
+  size?: number;
 }
 
 export class TorboxService {
-  private static readonly API_BASE_URL = 'https://api.torbox.app/v1';
-  private static readonly INSTANT_AVAILABILITY_TTL_MS = 5 * 60 * 1000; // 5 minutes
-  private static instantAvailabilityCache = new Map<string, TorboxInstantCacheEntry>();
+  private static readonly INSTANT_AVAILABILITY_TTL_MS = 5 * 60 * 1000; // 5 min
+  private static availabilityCache = new Map<string, AvailabilityCacheEntry>();
 
-  constructor(private token: string) {}
+  private client: TorboxClient;
 
-  private static buildHeaders(token: string): Record<string, string> {
-    return {
-      Authorization: `Bearer ${token}`,
-      'X-API-Key': token
-    };
+  constructor(private token: string) {
+    this.client = new TorboxClient({ token });
   }
 
+  // ---------- Instant availability ----------
   static async fetchCachedInfoHashes(hashes: string[], token?: string): Promise<Set<string>> {
     const result = new Set<string>();
-    if (!hashes || hashes.length === 0) {
+    if (!token || hashes.length === 0) {
       return result;
     }
 
-    const normalizedHashes = hashes
-      .map((hash) => hash?.toLowerCase())
-      .filter((hash): hash is string => Boolean(hash));
+    const normalized = hashes
+      .map((h) => h?.toLowerCase())
+      .filter((h): h is string => Boolean(h));
 
     const now = Date.now();
-    const hashesToFetch: string[] = [];
-
-    for (const hash of normalizedHashes) {
-      const cacheEntry = this.instantAvailabilityCache.get(hash);
-      if (cacheEntry && cacheEntry.expires > now) {
-        if (cacheEntry.cached) {
-          result.add(hash);
-        }
-      } else if (token) {
-        hashesToFetch.push(hash);
+    const toFetch: string[] = [];
+    for (const h of normalized) {
+      const cache = this.availabilityCache.get(h);
+      if (cache && cache.expires > now) {
+        if (cache.cached) result.add(h);
+        continue;
       }
+      toFetch.push(h);
     }
 
-    if (!token || hashesToFetch.length === 0) {
-      return result;
-    }
+    if (toFetch.length === 0) return result;
 
-    const headers = this.buildHeaders(token);
-    const chunkSize = 50;
-
-    for (let i = 0; i < hashesToFetch.length; i += chunkSize) {
-      const chunk = hashesToFetch.slice(i, i + chunkSize);
-      const cachedHashes = await this.fetchInstantAvailabilityForChunk(chunk, headers);
-      for (const hash of cachedHashes) {
-        result.add(hash);
-      }
-      this.updateAvailabilityCache(chunk, cachedHashes, now);
+    const client = new TorboxClient({ token });
+    try {
+      const payload = await client.checkTorrentsCached(toFetch, true);
+      const cached = new Set(payload.map((i) => (i.hash ?? '').toLowerCase()).filter(Boolean));
+      this.updateAvailabilityCache(toFetch, cached, now);
+      cached.forEach((h) => result.add(h));
+    } catch {
+      // ignore failures, return what we have
     }
 
     return result;
   }
 
-  private static async fetchInstantAvailabilityForChunk(
-    hashes: string[],
-    headers: Record<string, string>
-  ): Promise<Set<string>> {
-    const cached = new Set<string>();
-    const hashList = hashes.map((hash) => hash.toLowerCase());
-    const endpoints = [
-      `${this.API_BASE_URL}/torrents/instantAvailability?hashes=${hashList.join(',')}`,
-      `${this.API_BASE_URL}/torrents/instantAvailability/${hashList.join(',')}`,
-      `${this.API_BASE_URL}/torrents/instantavailability?hashes=${hashList.join(',')}`,
-      `${this.API_BASE_URL}/instantAvailability?hashes=${hashList.join(',')}`
-    ];
-
-    for (const endpoint of endpoints) {
-      const payload = await this.fetchPayload(endpoint, headers);
-      if (!payload) {
-        continue;
-      }
-      const collected = this.collectCachedHashesFromPayload(payload);
-      if (collected.size > 0) {
-        for (const hash of collected) {
-          cached.add(hash.toLowerCase());
-        }
-      }
-      if (Object.keys(payload).length > 0) {
-        break;
-      }
-    }
-
-    return cached;
-  }
-
-  private static async fetchPayload(
-    endpoint: string,
-    headers: Record<string, string>
-  ): Promise<TorboxPayload | undefined> {
-    try {
-      const response = await request(endpoint, { headers });
-      if (response.statusCode >= 400) {
-        await response.body.dump();
-        return undefined;
-      }
-      return (await response.body.json()) as TorboxPayload;
-    } catch {
-      return undefined;
-    }
-  }
-
-  private static collectCachedHashesFromPayload(payload: TorboxPayload): Set<string> {
-    const cached = new Set<string>();
-    const data = (payload as Record<string, unknown>).data ?? payload;
-
-    if (Array.isArray(data)) {
-      for (const entry of data) {
-        const hash = this.extractHash(entry);
-        if (hash && this.isCachedEntry(entry)) {
-          cached.add(hash.toLowerCase());
-        }
-      }
-      return cached;
-    }
-
-    if (data && typeof data === 'object') {
-      for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
-        if (this.looksLikeHash(key)) {
-          if (this.isCachedEntry(value)) {
-            cached.add(key.toLowerCase());
-          }
-          continue;
-        }
-
-        if (this.isCachedEntry(value)) {
-          const extracted = this.extractHash(value);
-          if (extracted) {
-            cached.add(extracted.toLowerCase());
-          }
-        }
-      }
-    }
-
-    return cached;
-  }
-
-  private static extractHash(value: unknown): string | undefined {
-    if (!value || typeof value !== 'object') {
-      return undefined;
-    }
-    const record = value as Record<string, unknown>;
-    const possible =
-      (record.hash as string) ||
-      (record.infoHash as string) ||
-      (record.info_hash as string) ||
-      (record.infohash as string);
-    if (possible && typeof possible === 'string') {
-      return possible;
-    }
-    return undefined;
-  }
-
-  private static looksLikeHash(value: string): boolean {
-    return /^[a-f0-9]{40}$/i.test(value);
-  }
-
-  private static isCachedEntry(value: unknown): boolean {
-    if (!value) {
-      return false;
-    }
-
-    if (Array.isArray(value)) {
-      return value.length > 0;
-    }
-
-    if (typeof value !== 'object') {
-      return Boolean(value);
-    }
-
-    const record = value as Record<string, unknown>;
-    const flags = ['cached', 'instant', 'available', 'ready', 'downloaded'];
-    for (const flag of flags) {
-      if (record[flag] === true) {
-        return true;
-      }
-    }
-
-    if (Array.isArray(record.files) && record.files.length > 0) {
-      return true;
-    }
-
-    if (Array.isArray(record.links) && record.links.length > 0) {
-      return true;
-    }
-
-    return Object.values(record).some((entry) => this.isCachedEntry(entry));
-  }
-
-  private static updateAvailabilityCache(
-    hashes: string[],
-    cachedHashes: Set<string>,
-    now: number
-  ): void {
+  private static updateAvailabilityCache(hashes: string[], cached: Set<string>, now: number): void {
     const expires = now + this.INSTANT_AVAILABILITY_TTL_MS;
-    for (const hash of hashes) {
-      const normalized = hash.toLowerCase();
-      this.instantAvailabilityCache.set(normalized, {
-        cached: cachedHashes.has(normalized),
-        expires
-      });
+    for (const h of hashes) {
+      this.availabilityCache.set(h, { cached: cached.has(h.toLowerCase()), expires });
     }
   }
 
-  async processMagnetToDirectUrl(magnet: string, context?: StreamContext): Promise<string> {
+  // ---------- Magnet flow ----------
+  async processMagnetToDirectUrl(magnet: string, context?: StreamContext): Promise<TorboxDirectResult> {
     try {
-      const { id: torrentId } = await this.addMagnet(magnet);
-      const torrentInfo = await this.getTorrentInfo(torrentId);
-      const files = this.extractFiles(torrentInfo);
-      if (files.length === 0) {
-        return this.createPlaceholderUrl();
+      const { torrent_id } = await this.client.createTorrent(magnet);
+      const torrent = await this.client.getTorrent(torrent_id);
+      const file = this.selectBestFile(torrent.files || [], context);
+
+      if (file?.id !== undefined) {
+        // selecting files is implicit in TorBox create, but keeping compatibility by requesting link with id
+        const link = await this.tryDownloadLink(() => this.client.requestDownloadLink({ torrentId: torrent_id, fileId: file.id }));
+        if (link.ready) return { ...link, fileName: file.name, size: file.size };
       }
 
-      const selectedFile = this.selectBestFile(files, context);
-      if (selectedFile?.id !== undefined) {
-        await this.selectFiles(torrentId, String(selectedFile.id));
-      }
-
-      const refreshedInfo = await this.getTorrentInfo(torrentId);
-      const directUrl = this.extractDirectUrl(refreshedInfo);
-      if (directUrl) {
-        return directUrl;
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 5000));
-      const retryInfo = await this.getTorrentInfo(torrentId);
-      const retryUrl = this.extractDirectUrl(retryInfo);
-      if (retryUrl) {
-        return retryUrl;
-      }
+      // If nothing ready, return placeholder
+      return this.placeholderResult();
     } catch {
-      // fall through to placeholder
+      return this.placeholderResult();
     }
-
-    return this.createPlaceholderUrl();
   }
 
-  private async addMagnet(magnet: string): Promise<{ id: string }> {
-    const endpoints = [
-      `${TorboxService.API_BASE_URL}/torrents/add`,
-      `${TorboxService.API_BASE_URL}/torrents/addMagnet`,
-      `${TorboxService.API_BASE_URL}/torrents/add-magnet`,
-      `${TorboxService.API_BASE_URL}/torrents`
-    ];
-
-    const headers = TorboxService.buildHeaders(this.token);
-
-    for (const endpoint of endpoints) {
-      const response = await this.postPayload(endpoint, headers, { magnet });
-      if (!response) {
-        continue;
-      }
-      const id = this.extractTorrentId(response);
-      if (id) {
-        return { id };
-      }
-    }
-
-    throw new Error('Failed to add magnet to Torbox');
-  }
-
-  private async postPayload(
-    endpoint: string,
-    headers: Record<string, string>,
-    body: Record<string, string>
-  ): Promise<TorboxPayload | undefined> {
-    const jsonHeaders = { ...headers, 'Content-Type': 'application/json' };
+  // ---------- WebDL flow ----------
+  async processWebDlToDirectUrl(url: string, context?: StreamContext): Promise<TorboxDirectResult> {
     try {
-      const response = await request(endpoint, {
-        method: 'POST',
-        headers: jsonHeaders,
-        body: JSON.stringify(body)
-      });
-      if (response.statusCode < 400) {
-        return (await response.body.json()) as TorboxPayload;
+      const name = context?.title || context?.episodeTitle;
+      const { webdownload_id } = await this.client.createWebDl(url, name);
+      const web = await this.client.getWebDl(webdownload_id);
+      const file = this.selectBestFile(web.files || [], context);
+
+      if (file?.id !== undefined) {
+        const link = await this.tryDownloadLink(() =>
+          this.client.requestWebDlLink({ webId: webdownload_id, fileId: file.id })
+        );
+        if (link.ready) return { ...link, fileName: file.name, size: file.size };
+      }
+
+      return this.placeholderResult();
+    } catch {
+      return this.placeholderResult();
+    }
+  }
+
+  // ---------- Helpers ----------
+  private async tryDownloadLink(fn: () => Promise<string>): Promise<TorboxDirectResult> {
+    // First attempt
+    const first = await this.safeCall(fn);
+    if (first) return { url: first, ready: true };
+
+    // Wait and retry once
+    await new Promise((r) => setTimeout(r, 5000));
+    const second = await this.safeCall(fn);
+    if (second) return { url: second, ready: true };
+
+    return { ...this.placeholderResult(), ready: false };
+  }
+
+  private async safeCall(fn: () => Promise<string>): Promise<string | undefined> {
+    try {
+      const link = await fn();
+      if (typeof link === 'string' && link.startsWith('http')) {
+        return link;
       }
     } catch {
       // ignore
     }
-
-    const formHeaders = { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' };
-    try {
-      const response = await request(endpoint, {
-        method: 'POST',
-        headers: formHeaders,
-        body: new URLSearchParams(body).toString()
-      });
-      if (response.statusCode < 400) {
-        return (await response.body.json()) as TorboxPayload;
-      }
-    } catch {
-      return undefined;
-    }
-
     return undefined;
   }
 
-  private extractTorrentId(payload: TorboxPayload): string | undefined {
-    const data = (payload as Record<string, unknown>).data ?? payload;
-    if (!data || typeof data !== 'object') {
-      return undefined;
-    }
-    const record = data as Record<string, unknown>;
-    const id =
-      (record.id as string) ||
-      (record.torrent_id as string) ||
-      (record.torrentId as string) ||
-      (record.item_id as string);
-    return typeof id === 'string' ? id : undefined;
-  }
+  private selectBestFile(files: TorboxFile[], context?: StreamContext): TorboxFile | undefined {
+    const videoFiles = files.filter((f) => this.isVideoFile(f.name ?? f.short_name ?? ''));
+    const candidates = videoFiles.length > 0 ? videoFiles : files;
+    if (candidates.length === 0) return undefined;
 
-  private async getTorrentInfo(torrentId: string): Promise<TorboxPayload> {
-    const endpoints = [
-      `${TorboxService.API_BASE_URL}/torrents/info/${torrentId}`,
-      `${TorboxService.API_BASE_URL}/torrents/${torrentId}`,
-      `${TorboxService.API_BASE_URL}/torrents/info?id=${torrentId}`
-    ];
-
-    const headers = TorboxService.buildHeaders(this.token);
-    for (const endpoint of endpoints) {
-      const payload = await TorboxService.fetchPayload(endpoint, headers);
-      if (payload) {
-        return payload;
-      }
-    }
-
-    throw new Error(`Failed to fetch Torbox torrent info: ${torrentId}`);
-  }
-
-  private extractFiles(payload: TorboxPayload): Array<{ id?: string | number; path: string; bytes: number }> {
-    const data = (payload as Record<string, unknown>).data ?? payload;
-    if (!data || typeof data !== 'object') {
-      return [];
-    }
-
-    const record = data as Record<string, unknown>;
-    const files = (record.files as unknown) ?? (record.content as unknown);
-    if (!Array.isArray(files)) {
-      return [];
-    }
-
-    return files
-      .map((file) => {
-        if (!file || typeof file !== 'object') {
-          return undefined;
-        }
-        const entry = file as Record<string, unknown>;
-        const path = (entry.path as string) || (entry.filename as string) || (entry.name as string);
-        const bytes =
-          (entry.bytes as number) ||
-          (entry.size as number) ||
-          (entry.filesize as number) ||
-          0;
-        const id = entry.id ?? entry.file_id ?? entry.fileId;
-        if (!path) {
-          return undefined;
-        }
-        return { id, path, bytes: Number(bytes) };
-      })
-      .filter((file): file is { id?: string | number; path: string; bytes: number } => Boolean(file));
-  }
-
-  private async selectFiles(torrentId: string, fileIds: string): Promise<void> {
-    const endpoints = [
-      `${TorboxService.API_BASE_URL}/torrents/selectFiles/${torrentId}`,
-      `${TorboxService.API_BASE_URL}/torrents/select/${torrentId}`,
-      `${TorboxService.API_BASE_URL}/torrents/${torrentId}/select`
-    ];
-
-    const headers = TorboxService.buildHeaders(this.token);
-
-    for (const endpoint of endpoints) {
-      const payload = await this.postPayload(endpoint, headers, { files: fileIds });
-      if (payload) {
-        return;
-      }
-    }
-  }
-
-  private extractDirectUrl(payload: TorboxPayload): string | undefined {
-    const data = (payload as Record<string, unknown>).data ?? payload;
-    if (!data || typeof data !== 'object') {
-      return undefined;
-    }
-
-    const record = data as Record<string, unknown>;
-    const candidates = [
-      record.download,
-      record.download_link,
-      record.downloadLink,
-      record.link,
-      record.stream_url,
-      record.streamUrl,
-      record.url
-    ];
-    for (const candidate of candidates) {
-      if (typeof candidate === 'string' && candidate.startsWith('http')) {
-        return candidate;
-      }
-    }
-
-    const links = record.links ?? record.downloads ?? record.files;
-    if (Array.isArray(links)) {
-      for (const entry of links) {
-        if (typeof entry === 'string' && entry.startsWith('http')) {
-          return entry;
-        }
-        if (entry && typeof entry === 'object') {
-          const link =
-            (entry as Record<string, unknown>).link ||
-            (entry as Record<string, unknown>).download ||
-            (entry as Record<string, unknown>).url;
-          if (typeof link === 'string' && link.startsWith('http')) {
-            return link;
-          }
-        }
-      }
-    }
-
-    return undefined;
-  }
-
-  private selectBestFile(
-    files: Array<{ id?: string | number; path: string; bytes: number }>,
-    context?: StreamContext
-  ): { id?: string | number; path: string; bytes: number } | undefined {
-    const videoFiles = files.filter((file) => this.isVideoFile(file.path));
-    if (videoFiles.length === 0) {
-      return files[0];
-    }
-
-    const contextualMatch = this.findContextualMatch(videoFiles, context);
-    if (contextualMatch) {
-      return contextualMatch;
-    }
-
-    return videoFiles.reduce((max, file) => (file.bytes > max.bytes ? file : max));
-  }
-
-  private findContextualMatch(
-    files: Array<{ id?: string | number; path: string; bytes: number }>,
-    context?: StreamContext
-  ): { id?: string | number; path: string; bytes: number } | undefined {
-    if (!context) {
-      return undefined;
-    }
-
-    const scored = files
-      .map((file) => ({ file, score: this.scoreFileAgainstContext(file, context) }))
-      .filter((entry) => entry.score > 0)
+    const withScore = candidates
+      .map((f) => ({ file: f, score: this.scoreFileAgainstContext(f, context) }))
       .sort((a, b) => {
-        if (b.score !== a.score) {
-          return b.score - a.score;
-        }
-        return b.file.bytes - a.file.bytes;
+        if (b.score !== a.score) return b.score - a.score;
+        return (b.file.size ?? 0) - (a.file.size ?? 0);
       });
 
-    return scored[0]?.file;
+    return withScore[0]?.file;
   }
 
-  private scoreFileAgainstContext(
-    file: { path: string; bytes: number },
-    context: StreamContext
-  ): number {
-    const normalizedPath = this.normalize(file.path);
-    if (!normalizedPath) {
-      return 0;
-    }
-
+  private scoreFileAgainstContext(file: TorboxFile, context?: StreamContext): number {
+    if (!context) return Math.log10((file.size ?? 0) + 1);
+    const path = this.normalize(file.name || file.short_name || file.path || '');
     let score = 0;
 
-    if (context.year && normalizedPath.includes(String(context.year))) {
-      score += 4;
-    }
-
+    if (context.year && path.includes(String(context.year))) score += 4;
     if (context.title) {
-      const normalizedTitle = this.normalize(context.title);
-      if (normalizedTitle && normalizedPath.includes(normalizedTitle)) {
-        score += 6;
-      }
+      const t = this.normalize(context.title);
+      if (t && path.includes(t)) score += 6;
     }
-
     if (context.episodeTitle) {
-      const normalizedEpisodeTitle = this.normalize(context.episodeTitle);
-      if (normalizedEpisodeTitle && normalizedPath.includes(normalizedEpisodeTitle)) {
-        score += 8;
-      }
+      const t = this.normalize(context.episodeTitle);
+      if (t && path.includes(t)) score += 8;
     }
-
     if (context.episode !== undefined) {
-      score += this.scoreEpisodeMatch(normalizedPath, context);
+      score += this.scoreEpisodeMatch(path, context);
     }
-
-    if (score > 0) {
-      score += Math.log10(file.bytes + 1);
-    }
-
-    return score;
+    return score + Math.log10((file.size ?? 0) + 1);
   }
 
   private scoreEpisodeMatch(path: string, context: StreamContext): number {
-    if (context.episode === undefined) {
-      return 0;
-    }
-
     const episode = context.episode;
-    const episodePadded = String(episode).padStart(2, '0');
+    if (episode === undefined) return 0;
+    const epPadded = String(episode).padStart(2, '0');
     const season = context.season;
 
-    const tokens: string[] = [];
-    tokens.push(`e${episode}`);
-    tokens.push(`ep${episode}`);
-    tokens.push(`episode${episode}`);
-    tokens.push(`episodio${episode}`);
-    tokens.push(`capitulo${episode}`);
-    tokens.push(`part${episode}`);
-
-    tokens.push(`e${episodePadded}`);
-    tokens.push(`ep${episodePadded}`);
-    tokens.push(`episode${episodePadded}`);
-    tokens.push(`episodio${episodePadded}`);
+    const tokens: string[] = [
+      `e${episode}`,
+      `ep${episode}`,
+      `episode${episode}`,
+      `e${epPadded}`,
+      `ep${epPadded}`,
+      `episode${epPadded}`
+    ];
 
     if (season !== undefined) {
-      const seasonPadded = String(season).padStart(2, '0');
-      tokens.push(`s${season}e${episode}`);
-      tokens.push(`s${season}e${episodePadded}`);
-      tokens.push(`s${seasonPadded}e${episodePadded}`);
-      tokens.push(`s${seasonPadded}e${episode}`);
-      tokens.push(`season${season}episode${episode}`);
-      tokens.push(`season${seasonPadded}episode${episodePadded}`);
-      tokens.push(`${season}x${episode}`);
-      tokens.push(`${season}x${episodePadded}`);
-      tokens.push(`${seasonPadded}x${episodePadded}`);
+      const s = String(season).padStart(2, '0');
+      tokens.push(`s${season}e${episode}`, `s${s}e${epPadded}`, `${season}x${episode}`, `${s}x${epPadded}`);
     }
 
-    const normalizedTokens = tokens.map((token) => this.normalize(token)).filter(Boolean) as string[];
-
-    let matchScore = 0;
-    for (const token of normalizedTokens) {
-      if (path.includes(token)) {
-        matchScore += token.length >= 4 ? 10 : 6;
-      }
-    }
-
-    if (context.episodeList && context.episodeList.includes(context.episode)) {
-      matchScore += 2;
-    }
-
-    return matchScore;
+    return tokens.reduce((acc, token) => (path.includes(token) ? acc + 6 : acc), 0);
   }
 
   private isVideoFile(path: string): boolean {
     return /\.(mp4|mkv|mov|avi|ts|m4v|wmv|flv|webm)$/i.test(path);
   }
 
-  private normalize(value: string | undefined): string {
-    if (!value) {
-      return '';
-    }
-
+  private normalize(value: string): string {
     return value
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
@@ -583,8 +207,8 @@ export class TorboxService {
       .toLowerCase();
   }
 
-  private createPlaceholderUrl(): string {
+  private placeholderResult(): TorboxDirectResult {
     const config = ConfigService.loadConfig();
-    return `${config.baseUrl}/placeholder/downloading.mp4`;
+    return { url: `${config.baseUrl}/placeholder/downloading.mp4`, ready: false };
   }
 }

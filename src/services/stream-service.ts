@@ -27,7 +27,13 @@ export class StreamService {
     const isReady = debridProvider === 'torbox' ? tbReady : rdReady;
     const providerLabel = debridProvider === 'torbox' ? 'TB' : 'RD';
     const readyLabel =
-      debridProvider === 'torbox' ? (isReady ? `${providerLabel}⚡` : providerLabel) : isReady ? `${providerLabel}+` : providerLabel;
+      debridProvider === 'torbox'
+        ? isReady
+          ? `${providerLabel}⚡`
+          : `${providerLabel}…`
+        : isReady
+          ? `${providerLabel}+`
+          : providerLabel;
     const baseName = sourceStream.name || `[Brazuca Debrid] ${fallbackTitle}`;
 
     const displayName =
@@ -43,6 +49,7 @@ export class StreamService {
     const behaviorHints: StremioStreamBehaviorHints = {};
     const shouldForceNotWebReady = options?.forceNotWebReady ?? true;
     if (debridProvider === 'torbox') {
+      behaviorHints.torboxReady = isReady;
       const bingeGroup = StreamService.buildBingeGroup(sourceStream, debridProvider);
       if (bingeGroup) {
         behaviorHints.bingeGroup = bingeGroup;
@@ -70,6 +77,9 @@ export class StreamService {
       const description = StreamService.buildTorboxDescription(sourceStream);
       if (description) {
         metadata.description = description;
+      }
+      if (!isReady && !metadata.description) {
+        metadata.description = 'Baixando no TorBox – aguarde alguns segundos e tente reproduzir novamente.';
       }
     }
 
@@ -127,7 +137,7 @@ export class StreamService {
       infoParts.push(stream.releaseGroup);
     }
     if (infoParts.length > 0) {
-      lines.push(`⭐ ${infoParts.join(' • ')}`);
+      lines.push(`★ ${infoParts.join(' • ')}`);
     }
 
     if (stream.size !== undefined) {
@@ -295,8 +305,7 @@ export class StreamService {
     const provider = this.extractDebridProvider(query, headers, extra);
     const realdebridToken =
       this.extractRealDebridToken(query, headers, extra, routeParams) || env?.realdebridToken;
-    const torboxToken =
-      this.extractTorboxToken(query, headers, extra) || env?.torboxToken;
+    const torboxToken = this.extractTorboxToken(query, headers, extra) || env?.torboxToken;
 
     if (provider === 'torbox') {
       return { provider, token: torboxToken, realdebridToken, torboxToken };

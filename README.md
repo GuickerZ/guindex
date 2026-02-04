@@ -4,10 +4,11 @@ A Stremio addon that acts as a proxy for torrent-based addons, processing magnet
 
 ## 🎯 Features
 
-- **Real-Debrid Integration**: Automatically processes magnet links through Real-Debrid
+- **Real-Debrid & TorBox**: Magnet processing through RD or TorBox (with instant cache detection)
+- **TorBox WebDL**: Direct HTTP links are sent to TorBox WebDL; returns placeholder while downloading
 - **Multiple Sources**: Supports multiple Stremio addon sources (starting with Brazuca Torrents)
-- **Deferred Processing**: Only processes torrents when user actually plays the stream
-- **Placeholder Video**: Shows downloading status while Real-Debrid processes torrents
+- **Deferred Processing**: Only processes torrents/links when user actually plays the stream
+- **Placeholder Video**: Shows downloading status while the debrid provider processes the item
 - **Clean Architecture**: Well-organized codebase with models, services, controllers, and routes
 - **Hot Reload**: Development server with automatic reloading
 - **Production Ready**: Configurable base URL for cloud deployment
@@ -113,11 +114,13 @@ export const SOURCES = [
 ];
 ```
 
-### Real-Debrid Token
+### Debrid Tokens
 
-The addon requires Real-Debrid tokens per request. Users can provide tokens via:
+Provide tokens per request:
 
-1. **Query Parameter**: `?realdebridToken=TOKEN`
+- **Real-Debrid**: `?realdebridToken=TOKEN` or header `x-rd-token`
+- **TorBox**: `?torboxToken=TOKEN` or header `x-tb-token`
+- **Provider selector**: `?debridProvider=torbox|realdebrid`
 2. **Header**: `x-rd-token: TOKEN`
 3. **Stremio Configuration**: Token is passed through Stremio's addon system
 

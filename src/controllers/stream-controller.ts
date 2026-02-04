@@ -42,9 +42,11 @@ export class StreamController {
         : undefined;
       const sourceStreams = await SourceService.fetchStreamsFromAllSources(type, id, fetchOptions);
       
-      // Filter streams that have magnet links or infoHash
+      // Split streams by transport type
       const processableStreams = sourceStreams.filter((stream) =>
-        stream.magnet || stream.infoHash || (stream.url && stream.url.startsWith('magnet:'))
+        stream.magnet ||
+        stream.infoHash ||
+        (stream.url && (stream.url.startsWith('magnet:') || stream.url.startsWith('https://')))
       );
 
       if (processableStreams.length === 0) {
@@ -63,26 +65,43 @@ export class StreamController {
       const streamMetadata: StremioStream[] = processableStreams
         .map((stream) => {
           const magnet = this.extractStreamMagnet(stream);
-          if (!magnet) {
-            console.debug(`Skipping stream without magnet/infoHash: ${stream.name ?? stream.title}`);
-            return undefined;
-          }
-
+          const isHttpStream = stream.url?.startsWith('https://');
           const isCached = stream.cached ?? false;
+
           const commonOptions = {
             fallbackMagnet: magnet,
             forceNotWebReady: !isCached || !selectedToken,
             realDebridReady: selectedProvider === 'realdebrid' ? isCached : undefined,
-            torboxReady: selectedProvider === 'torbox' ? isCached : undefined,
+            torboxReady:
+              selectedProvider === 'torbox'
+                ? isHttpStream
+                  ? undefined // unknown until WebDL finishes
+                  : isCached
+                : undefined,
             debridProvider: selectedProvider ?? 'realdebrid'
           };
 
           if (!selectedToken) {
-            return StreamService.createStreamMetadata(stream, magnet, commonOptions);
+            const url = magnet ?? stream.url;
+            if (!url) return undefined;
+            return StreamService.createStreamMetadata(stream, url, commonOptions);
           }
 
-          const apiUrl = this.buildResolveUrl(selectedToken, magnet, stream.context, selectedProvider);
-          return StreamService.createStreamMetadata(stream, apiUrl, commonOptions);
+          if (selectedProvider !== 'torbox' && !magnet) {
+            console.debug(`Skipping non-TorBox stream without magnet: ${stream.name ?? stream.title}`);
+            return undefined;
+          }
+
+          const resolveUrl = this.buildResolveUrl({
+            token: selectedToken,
+            magnet,
+            provider: selectedProvider,
+            context: stream.context,
+            linkType: isHttpStream ? 'webdl' : 'torrent',
+            originalUrl: isHttpStream ? stream.url : undefined
+          });
+
+          return StreamService.createStreamMetadata(stream, resolveUrl, commonOptions);
         })
         .filter((stream): stream is StremioStream => Boolean(stream));
 
@@ -102,31 +121,43 @@ export class StreamController {
   }
 
   /**
-   * Processes a magnet link through the selected debrid provider when user actually plays the stream
+   * Processes a link (magnet or WebDL URL) through the selected debrid provider when user actually plays the stream.
    */
-  async processMagnetForPlayback(
-    magnet: string,
-    token: string,
-    provider: DebridProvider = 'realdebrid',
-    context?: StreamContext
-  ): Promise<string> {
+  async processLinkForPlayback(params: {
+    magnet?: string;
+    url?: string;
+    token: string;
+    provider: DebridProvider;
+    context?: StreamContext;
+  }): Promise<string> {
+    const { magnet, url, token, provider, context } = params;
+
     if (!token) {
       throw new Error('Debrid token is required for playback');
     }
 
     try {
-      console.debug(`Processing magnet for playback: ${magnet.substring(0, 50)}...`);
-      
-      const directUrl =
-        provider === 'torbox'
-          ? await new TorboxService(token).processMagnetToDirectUrl(magnet, context)
-          : await new RealDebridService(token).processMagnetToDirectUrl(magnet, context);
-      
-      console.debug(`Successfully processed magnet for playback: ${directUrl}`);
+      console.debug(`Processing link for playback via ${provider}`);
+
+      if (provider === 'torbox') {
+        const service = new TorboxService(token);
+        if (url && !magnet) {
+          const result = await service.processWebDlToDirectUrl(url, context);
+          return result.url;
+        }
+        if (!magnet) throw new Error('Magnet is required for torrent playback');
+        const result = await service.processMagnetToDirectUrl(magnet, context);
+        return result.url;
+      }
+
+      // RealDebrid only supports torrents here
+      if (!magnet) {
+        throw new Error('Magnet is required for Real-Debrid playback');
+      }
+      const directUrl = await new RealDebridService(token).processMagnetToDirectUrl(magnet, context);
       return directUrl;
-      
     } catch (error) {
-      console.error(`Failed to process magnet for playback: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error(`Failed to process link for playback: ${error instanceof Error ? error.message : 'Unknown error'}`);
       throw error;
     }
   }
@@ -206,21 +237,24 @@ export class StreamController {
     }
   }
 
-  private buildResolveUrl(
-    token: string,
-    magnet: string,
-    context?: StreamContext,
-    provider?: DebridProvider
-  ): string {
+  private buildResolveUrl(params: {
+    token: string;
+    magnet?: string;
+    originalUrl?: string;
+    context?: StreamContext;
+    provider?: DebridProvider;
+    linkType?: 'torrent' | 'webdl';
+  }): string {
+    const { token, magnet, originalUrl, context, provider, linkType } = params;
     const base = this.resolveBaseUrl.endsWith('/')
       ? this.resolveBaseUrl
       : `${this.resolveBaseUrl}/`;
     const url = new URL('resolve', base);
     url.searchParams.set('token', token);
-    url.searchParams.set('magnet', magnet);
-    if (provider) {
-      url.searchParams.set('debridProvider', provider);
-    }
+    if (magnet) url.searchParams.set('magnet', magnet);
+    if (originalUrl) url.searchParams.set('url', originalUrl);
+    if (provider) url.searchParams.set('debridProvider', provider);
+    if (linkType) url.searchParams.set('linkType', linkType);
 
     const contextValue = StreamService.encodeStreamContext(context);
     if (contextValue) {

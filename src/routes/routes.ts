@@ -186,8 +186,10 @@ export function setupRoutes() {
   const handleResolveRequest = async (
     reply: FastifyReply,
     token: string,
-    magnet: string,
+    magnet?: string,
+    originalUrl?: string,
     provider?: string,
+    linkType?: string,
     ctx?: string
   ) => {
     try {
@@ -196,12 +198,30 @@ export function setupRoutes() {
         { debridProvider: provider },
         {}
       );
-      const directUrl = await streamController.processMagnetForPlayback(
+      const resolvedProvider = debridProvider ?? 'realdebrid';
+
+      if (resolvedProvider === 'torbox' && linkType === 'webdl' && originalUrl) {
+        const directUrl = await streamController.processLinkForPlayback({
+          url: originalUrl,
+          token,
+          provider: resolvedProvider,
+          context
+        });
+        reply.redirect(directUrl);
+        return;
+      }
+
+      if (!magnet) {
+        reply.status(400).send({ error: 'Magnet link is required for this provider' });
+        return;
+      }
+
+      const directUrl = await streamController.processLinkForPlayback({
         magnet,
         token,
-        debridProvider ?? 'realdebrid',
+        provider: resolvedProvider,
         context
-      );
+      });
       reply.redirect(directUrl);
     } catch (error) {
       logger.error(`Magnet processing error: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -214,6 +234,8 @@ export function setupRoutes() {
     magnet?: string | undefined;
     provider?: string | undefined;
     ctx?: string | undefined;
+    url?: string | undefined;
+    linkType?: string | undefined;
   };
 
   const registerResolveRoute = (
@@ -230,17 +252,29 @@ export function setupRoutes() {
         }
 
         const { token, magnet, provider, ctx } = extractor(req);
+        const linkType = (req.query as any)?.linkType as string | undefined;
+        const originalUrl = (req.query as any)?.url as string | undefined;
+
+        if (!token) {
+          reply.status(400).send({ error: 'Debrid token is required' });
+          return;
+        }
+
+        if (linkType === 'webdl') {
+          if (!originalUrl) {
+            reply.status(400).send({ error: 'URL is required for TorBox WebDL' });
+            return;
+          }
+          await handleResolveRequest(reply, token, undefined, originalUrl, provider, linkType, ctx);
+          return;
+        }
 
         if (!magnet) {
           reply.status(400).send({ error: 'Magnet link is required' });
           return;
         }
 
-        if (!token) {
-          reply.status(400).send({ error: 'Debrid token is required' });
-          return;
-        }
-        await handleResolveRequest(reply, token, magnet, provider, ctx);
+        await handleResolveRequest(reply, token, magnet, undefined, provider, linkType, ctx);
       }
     });
   };
@@ -252,23 +286,29 @@ export function setupRoutes() {
       ctx?: string;
       debridProvider?: string;
       provider?: string;
+      url?: string;
+      linkType?: string;
     };
     return {
       token: query.token,
       magnet: query.magnet,
       provider: query.debridProvider ?? query.provider,
-      ctx: query.ctx
+      ctx: query.ctx,
+      url: query.url,
+      linkType: query.linkType
     };
   });
 
   registerResolveRoute('/resolve/:token/:magnet', (req) => {
     const params = req.params as { token?: string; magnet?: string };
-    const query = req.query as { ctx?: string; debridProvider?: string; provider?: string };
+    const query = req.query as { ctx?: string; debridProvider?: string; provider?: string; url?: string; linkType?: string };
     return {
       token: params.token,
       magnet: params.magnet,
       provider: query.debridProvider ?? query.provider,
-      ctx: query.ctx
+      ctx: query.ctx,
+      url: query.url,
+      linkType: query.linkType
     };
   });
 

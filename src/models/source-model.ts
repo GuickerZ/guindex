@@ -7,11 +7,11 @@ export interface StreamContext {
   episode?: number;
   episodeTitle?: string;
   title?: string;
-  year?: number;
+ year?: number;
   episodeList?: number[];
 }
 export interface SourceStream {
-  cached: boolean;
+  cached?: boolean;
   name?: string;
   title?: string;
   fileName?: string;
