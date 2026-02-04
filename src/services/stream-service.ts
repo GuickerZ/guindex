@@ -26,7 +26,8 @@ export class StreamService {
     const tbReady = options?.torboxReady ?? sourceStream.cached ?? false;
     const isReady = debridProvider === 'torbox' ? tbReady : rdReady;
     const providerLabel = debridProvider === 'torbox' ? 'TB' : 'RD';
-    const readyLabel = isReady ? `${providerLabel}+` : providerLabel;
+    const readyLabel =
+      debridProvider === 'torbox' ? (isReady ? `${providerLabel}⚡` : providerLabel) : isReady ? `${providerLabel}+` : providerLabel;
     const baseName = sourceStream.name || `[Brazuca Debrid] ${fallbackTitle}`;
 
     const metadata: StremioStream = {
@@ -42,6 +43,16 @@ export class StreamService {
     }
     if (debridProvider === 'torbox') {
       behaviorHints.torboxReady = isReady;
+      const bingeGroup = StreamService.buildBingeGroup(sourceStream, debridProvider);
+      if (bingeGroup) {
+        behaviorHints.bingeGroup = bingeGroup;
+      }
+      if (sourceStream.fileName) {
+        behaviorHints.filename = sourceStream.fileName;
+      }
+      if (sourceStream.size !== undefined) {
+        behaviorHints.videoSize = sourceStream.size;
+      }
     } else {
       behaviorHints.realDebridReady = isReady;
     }
@@ -50,6 +61,13 @@ export class StreamService {
     }
     if (Object.keys(behaviorHints).length > 0) {
       metadata.behaviorHints = behaviorHints;
+    }
+
+    if (debridProvider === 'torbox') {
+      const description = StreamService.buildTorboxDescription(sourceStream);
+      if (description) {
+        metadata.description = description;
+      }
     }
 
     // Add optional properties only if they exist
@@ -62,6 +80,62 @@ export class StreamService {
     if (sourceStream.releaseGroup) metadata.releaseGroup = sourceStream.releaseGroup;
 
     return metadata;
+  }
+
+  private static buildBingeGroup(stream: SourceStream, provider: DebridProvider): string | undefined {
+    const hash = stream.infoHash?.trim();
+    const source = stream.source?.trim();
+    if (!hash || !source) {
+      return undefined;
+    }
+
+    return `${source.toLowerCase()}|${provider}|${hash.toLowerCase()}`;
+  }
+
+  private static buildTorboxDescription(stream: SourceStream): string | undefined {
+    const fileName = stream.fileName || stream.title;
+    if (!fileName) {
+      return undefined;
+    }
+
+    const lines: string[] = [];
+    lines.push(`📄 ${fileName}`);
+
+    const infoParts: string[] = [];
+    if (stream.quality) {
+      infoParts.push(stream.quality);
+    }
+    if (stream.releaseGroup) {
+      infoParts.push(stream.releaseGroup);
+    }
+    if (infoParts.length > 0) {
+      lines.push(`⭐ ${infoParts.join(' • ')}`);
+    }
+
+    if (stream.size !== undefined) {
+      lines.push(`💾 ${StreamService.formatBytes(stream.size)}`);
+    }
+
+    if (stream.source) {
+      lines.push(`🔎 ${stream.source}`);
+    }
+
+    return lines.join('\n');
+  }
+
+  private static formatBytes(bytes: number): string {
+    if (!Number.isFinite(bytes) || bytes <= 0) {
+      return '0 B';
+    }
+
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let size = bytes;
+    let unitIndex = 0;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex += 1;
+    }
+    return `${size.toFixed(size >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
   }
 
   private static sanitizeExternalUrl(url?: string): string | undefined {

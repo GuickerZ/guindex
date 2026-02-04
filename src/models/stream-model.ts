@@ -7,11 +7,15 @@ export interface StremioStreamBehaviorHints {
   realDebridReady?: boolean;
   torboxReady?: boolean;
   fallbackMagnet?: string;
+  bingeGroup?: string;
+  filename?: string;
+  videoSize?: number;
 }
 
 export interface StremioStream {
   name?: string;
   title?: string;
+  description?: string;
   url: string;
   behaviorHints?: StremioStreamBehaviorHints;
   infoHash?: string;

@@ -943,6 +943,8 @@ private mapTorrentToStream(
   const stream: SourceStream = {
     name: nameLines.join('\n'),
     title: titleLines.join('\n'),
+    fileName: this.extractFileName(torrent) || displayTitle,
+    source: sourceLabel,
     magnet,
     cached: false
   };
@@ -1155,6 +1157,32 @@ private mapTorrentToStream(
       if (normalized) {
         return normalized;
       }
+    }
+
+    return undefined;
+  }
+
+  private extractFileName(torrent: TorrentLike): string | undefined {
+    const record = torrent as Record<string, unknown>;
+    const candidates = [
+      this.toString(record.filename),
+      this.toString(record.file),
+      this.toString(record.path),
+      this.toString(record.name),
+      this.toString(record.title)
+    ];
+
+    for (const candidate of candidates) {
+      if (!candidate) {
+        continue;
+      }
+
+      const trimmed = candidate.trim();
+      if (!trimmed) {
+        continue;
+      }
+
+      return trimmed;
     }
 
     return undefined;

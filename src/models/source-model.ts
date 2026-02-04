@@ -14,6 +14,8 @@ export interface SourceStream {
   cached: boolean;
   name?: string;
   title?: string;
+  fileName?: string;
+  source?: string;
   url?: string;
   magnet?: string;
   infoHash?: string;
