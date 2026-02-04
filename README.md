@@ -114,13 +114,14 @@ export const SOURCES = [
 ];
 ```
 
-### Debrid Tokens
+### Debrid Tokens & TorBox Wait Video
 
 Provide tokens per request:
 
 - **Real-Debrid**: `?realdebridToken=TOKEN` or header `x-rd-token`
 - **TorBox**: `?torboxToken=TOKEN` or header `x-tb-token`
 - **Provider selector**: `?debridProvider=torbox|realdebrid`
+- **TorBox wait video**: set `TORBOX_WAIT_VIDEO_URL` to an external MP4 (ex.: `https://aiostreams.elfhosted.com/static/downloading.mp4`) used when the torrent ainda está baixando.
 2. **Header**: `x-rd-token: TOKEN`
 3. **Stremio Configuration**: Token is passed through Stremio's addon system
 

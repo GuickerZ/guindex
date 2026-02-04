@@ -12,6 +12,9 @@ export class ConfigService {
     const normalizedBaseUrl =
       ConfigService.normalizeBaseUrl(process.env.BASE_URL) ||
       ConfigService.normalizeBaseUrl('https://brazuca-rd.vercel.app')!;
+    const waitVideoUrl =
+      ConfigService.normalizeBaseUrl(process.env.TORBOX_WAIT_VIDEO_URL) ||
+      ConfigService.normalizeBaseUrl('https://aiostreams.elfhosted.com/static/downloading.mp4');
 
     // Debug logging for environment variables
     console.log('Environment variables:');
@@ -24,7 +27,8 @@ export class ConfigService {
     const config: AppConfig = {
       port,
       logLevel,
-      baseUrl: normalizedBaseUrl
+      baseUrl: normalizedBaseUrl,
+      waitVideoUrl
     };
 
     console.log('Final config:', config);

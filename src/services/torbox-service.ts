@@ -21,9 +21,12 @@ export class TorboxService {
   private static availabilityCache = new Map<string, AvailabilityCacheEntry>();
 
   private client: TorboxClient;
+  private waitVideoUrl?: string;
 
   constructor(private token: string) {
     this.client = new TorboxClient({ token });
+    const config = ConfigService.loadConfig();
+    this.waitVideoUrl = config.waitVideoUrl;
   }
 
   // ---------- Instant availability ----------
@@ -53,9 +56,19 @@ export class TorboxService {
     const client = new TorboxClient({ token });
     try {
       const payload = await client.checkTorrentsCached(toFetch, true);
-      const cached = new Set(payload.map((i) => (i.hash ?? '').toLowerCase()).filter(Boolean));
-      this.updateAvailabilityCache(toFetch, cached, now);
-      cached.forEach((h) => result.add(h));
+      const cachedSet = new Set<string>();
+      for (const item of payload) {
+        const h = (item.hash ?? '').toLowerCase();
+        if (h && item.files && item.files.length > 0) {
+          cachedSet.add(h);
+          continue;
+        }
+        if (h) {
+          cachedSet.add(h); // treat as cached if returned
+        }
+      }
+      this.updateAvailabilityCache(toFetch, cachedSet, now);
+      cachedSet.forEach((h) => result.add(h));
     } catch {
       // ignore failures, return what we have
     }
@@ -74,16 +87,33 @@ export class TorboxService {
   async processMagnetToDirectUrl(magnet: string, context?: StreamContext): Promise<TorboxDirectResult> {
     try {
       const { torrent_id } = await this.client.createTorrent(magnet);
-      const torrent = await this.client.getTorrent(torrent_id);
-      const file = this.selectBestFile(torrent.files || [], context);
 
-      if (file?.id !== undefined) {
-        // selecting files is implicit in TorBox create, but keeping compatibility by requesting link with id
-        const link = await this.tryDownloadLink(() => this.client.requestDownloadLink({ torrentId: torrent_id, fileId: file.id }));
-        if (link.ready) return { ...link, fileName: file.name, size: file.size };
-      }
+      const attempt = async () => {
+        const info = await this.client.getTorrent(torrent_id);
+        const ready = this.isReady(info);
+        const file = this.selectBestFile(info.files || [], context);
+        if (ready && file?.id !== undefined) {
+          const link = await this.safeCall(() =>
+            this.client.requestDownloadLink({ torrentId: torrent_id, fileId: file.id })
+          );
+          if (link) {
+            return { url: link, ready: true, fileName: file.name, size: file.size };
+          }
+        }
+        return undefined;
+      };
 
-      // If nothing ready, return placeholder
+      const immediate = await attempt();
+      if (immediate) return immediate;
+
+      await this.sleep(2000);
+      const retry = await attempt();
+      if (retry) return retry;
+
+      await this.sleep(3000);
+      const retry2 = await attempt();
+      if (retry2) return retry2;
+
       return this.placeholderResult();
     } catch {
       return this.placeholderResult();
@@ -95,15 +125,29 @@ export class TorboxService {
     try {
       const name = context?.title || context?.episodeTitle;
       const { webdownload_id } = await this.client.createWebDl(url, name);
-      const web = await this.client.getWebDl(webdownload_id);
-      const file = this.selectBestFile(web.files || [], context);
+      const attempt = async () => {
+        const web = await this.client.getWebDl(webdownload_id);
+        const file = this.selectBestFile(web.files || [], context);
+        const ready = this.isReady(web);
+        if (ready && file?.id !== undefined) {
+          const link = await this.safeCall(() =>
+            this.client.requestWebDlLink({ webId: webdownload_id, fileId: file.id })
+          );
+          if (link) return { url: link, ready: true, fileName: file.name, size: file.size };
+        }
+        return undefined;
+      };
 
-      if (file?.id !== undefined) {
-        const link = await this.tryDownloadLink(() =>
-          this.client.requestWebDlLink({ webId: webdownload_id, fileId: file.id })
-        );
-        if (link.ready) return { ...link, fileName: file.name, size: file.size };
-      }
+      const immediate = await attempt();
+      if (immediate) return immediate;
+
+      await this.sleep(2000);
+      const retry = await attempt();
+      if (retry) return retry;
+
+      await this.sleep(3000);
+      const retry2 = await attempt();
+      if (retry2) return retry2;
 
       return this.placeholderResult();
     } catch {
@@ -112,19 +156,6 @@ export class TorboxService {
   }
 
   // ---------- Helpers ----------
-  private async tryDownloadLink(fn: () => Promise<string>): Promise<TorboxDirectResult> {
-    // First attempt
-    const first = await this.safeCall(fn);
-    if (first) return { url: first, ready: true };
-
-    // Wait and retry once
-    await new Promise((r) => setTimeout(r, 5000));
-    const second = await this.safeCall(fn);
-    if (second) return { url: second, ready: true };
-
-    return { ...this.placeholderResult(), ready: false };
-  }
-
   private async safeCall(fn: () => Promise<string>): Promise<string | undefined> {
     try {
       const link = await fn();
@@ -135,6 +166,20 @@ export class TorboxService {
       // ignore
     }
     return undefined;
+  }
+
+  private isReady(info: TorboxTorrent | TorboxWebDl): boolean {
+    const state = (info.download_state || '').toLowerCase();
+    return (
+      info.download_present === true ||
+      info.download_finished === true ||
+      state === 'cached' ||
+      state === 'completed'
+    );
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   private selectBestFile(files: TorboxFile[], context?: StreamContext): TorboxFile | undefined {
@@ -209,7 +254,10 @@ export class TorboxService {
 
   private placeholderResult(): TorboxDirectResult {
     const config = ConfigService.loadConfig();
-    // fallback to base url (will 404) but avoid non-existing downloading.mp4 complaints
-    return { url: `${config.baseUrl}/`, ready: false };
+    const waitUrl = config.waitVideoUrl;
+    if (!waitUrl) {
+      throw new Error('TORBOX_WAIT_VIDEO_URL is required for TorBox placeholder');
+    }
+    return { url: waitUrl, ready: false };
   }
 }

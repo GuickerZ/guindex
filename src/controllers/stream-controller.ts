@@ -58,20 +58,11 @@ export class StreamController {
 
       await this.ensureDebridAvailability(processableStreams, selectedProvider, selectedToken);
 
-      // For TorBox with token, keep only cached torrents (avoid placeholder issues)
-      const filteredStreams =
-        selectedProvider === 'torbox' && selectedToken
-          ? processableStreams.filter(
-              (s) =>
-                s.cached === true || (s.url && s.url.startsWith('https://')) // keep direct HTTP (WebDL) if present
-            )
-          : processableStreams;
-
       if (!selectedToken) {
         console.debug('No debrid token provided, returning magnet fallback streams');
       }
 
-      const streamMetadata: StremioStream[] = filteredStreams
+      let streamMetadata: StremioStream[] = processableStreams
         .map((stream) => {
           const magnet = this.extractStreamMagnet(stream);
           const isHttpStream = stream.url?.startsWith('https://');
@@ -79,7 +70,8 @@ export class StreamController {
 
           const commonOptions = {
             fallbackMagnet: magnet,
-            forceNotWebReady: !isCached || !selectedToken,
+            forceNotWebReady:
+              selectedProvider === 'torbox' ? false : !isCached || !selectedToken,
             realDebridReady: selectedProvider === 'realdebrid' ? isCached : undefined,
             torboxReady:
               selectedProvider === 'torbox'
@@ -121,6 +113,20 @@ export class StreamController {
           return meta;
         })
         .filter((stream): stream is StremioStream => Boolean(stream));
+
+      // Sort and limit for TorBox to keep JSON lean
+      if (selectedProvider === 'torbox') {
+        streamMetadata = streamMetadata
+          .sort((a, b) => {
+            const aReady = a.behaviorHints?.torboxReady ? 1 : 0;
+            const bReady = b.behaviorHints?.torboxReady ? 1 : 0;
+            if (aReady !== bReady) return bReady - aReady;
+            const aSize = (a.behaviorHints as any)?.videoSize ?? 0;
+            const bSize = (b.behaviorHints as any)?.videoSize ?? 0;
+            return bSize - aSize;
+          })
+          .slice(0, 12);
+      }
 
       streamMetadata.sort((a, b) => {
         const aReady = a.behaviorHints?.realDebridReady || a.behaviorHints?.torboxReady ? 1 : 0;

@@ -6,6 +6,7 @@ export interface AppConfig {
   port: number;
   logLevel: 'info' | 'debug' | 'error' | 'warn';
   baseUrl: string; // Base URL for the addon (e.g., https://your-domain.com)
+  waitVideoUrl?: string; // External MP4 for TorBox waiting state
 }
 
 export interface AddonManifest {
