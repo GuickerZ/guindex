@@ -5,7 +5,9 @@
 import type { SourceStream } from '../models/source-model.js';
 
 export interface SourceFetchOptions {
+  debridProvider?: 'realdebrid' | 'torbox';
   realdebridToken?: string;
+  torboxToken?: string;
 }
 
 export abstract class BaseSourceProvider {
