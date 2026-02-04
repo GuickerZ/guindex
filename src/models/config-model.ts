@@ -28,5 +28,7 @@ export interface AddonManifest {
     type: string;
     title: string;
     description: string;
+    options?: Array<{ value: string; label: string }>;
+    default?: string;
   }>;
 }
