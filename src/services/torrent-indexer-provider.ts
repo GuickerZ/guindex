@@ -5,6 +5,7 @@
 import { request } from 'undici';
 import { BaseSourceProvider, type SourceFetchOptions } from './base-source-provider.js';
 import { RealDebridService } from './realdebrid-service.js';
+import { TorboxService } from './torbox-service.js';
 import type { SourceStream, StreamContext } from '../models/source-model.js';
 
 interface ParsedIdInfo {
@@ -214,7 +215,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       return streams;
     }
 
-    await this.decorateWithRealDebrid(streams, options?.realdebridToken);
+    await this.decorateWithDebrid(streams, options);
 
     return streams;
   }
@@ -233,9 +234,9 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     return undefined;
   }
 
-  private async decorateWithRealDebrid(
+  private async decorateWithDebrid(
     streams: SourceStream[],
-    token?: string
+    options?: SourceFetchOptions
   ): Promise<void> {
     const hashToStreams = new Map<string, SourceStream[]>();
 
@@ -259,23 +260,50 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
     let cachedHashes = new Set<string>();
     try {
-      cachedHashes = await RealDebridService.fetchCachedInfoHashes(
-        [...hashToStreams.keys()],
-        token
-      );
+      cachedHashes = await this.fetchDebridCachedHashes([...hashToStreams.keys()], options);
     } catch {
       cachedHashes = new Set<string>();
     }
+
+    const badgeProvider =
+      options?.debridProvider ?? (options?.torboxToken && !options?.realdebridToken ? 'torbox' : 'realdebrid');
 
     for (const [hash, relatedStreams] of hashToStreams.entries()) {
       const isCached = cachedHashes.has(hash);
       for (const s of relatedStreams) {
         s.cached = isCached;
         if (isCached) {
-          this.applyRealDebridBadge(s);
+          this.applyDebridBadge(s, badgeProvider);
         }
       }
     }
+  }
+
+  private async fetchDebridCachedHashes(
+    hashes: string[],
+    options?: SourceFetchOptions
+  ): Promise<Set<string>> {
+    const provider = options?.debridProvider;
+    const rdToken = options?.realdebridToken;
+    const tbToken = options?.torboxToken;
+
+    if (provider === 'torbox') {
+      return TorboxService.fetchCachedInfoHashes(hashes, tbToken);
+    }
+
+    if (provider === 'realdebrid') {
+      return RealDebridService.fetchCachedInfoHashes(hashes, rdToken);
+    }
+
+    if (tbToken) {
+      return TorboxService.fetchCachedInfoHashes(hashes, tbToken);
+    }
+
+    if (rdToken) {
+      return RealDebridService.fetchCachedInfoHashes(hashes, rdToken);
+    }
+
+    return new Set<string>();
   }
   private getStreamInfoHash(stream: SourceStream): string | undefined {
     if (typeof stream.infoHash === 'string' && stream.infoHash.trim()) {
@@ -292,8 +320,11 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     return undefined;
   }
 
-  private applyRealDebridBadge(stream: SourceStream): void {
+  private applyDebridBadge(stream: SourceStream, provider: 'realdebrid' | 'torbox'): void {
     if (!stream) return;
+
+    const providerLabel = provider === 'torbox' ? 'TB' : 'RD';
+    const providerName = provider === 'torbox' ? 'Torbox' : 'Real-Debrid';
   
     // name: adiciona "⚡ RD+" na primeira linha (substitui/remenda RD existente)
     if (typeof stream.name === 'string' && stream.name.length > 0) {
@@ -301,26 +332,33 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       const firstLine = nameLines[0] ?? '';
   
       // remove marcas antigas
-      let cleaned = firstLine.replace(/\[RD\]/gi, '').replace(/RD\+/gi, '').replace(/\bRD\b/gi, '').trim();
+      let cleaned = firstLine
+        .replace(/\[RD\]/gi, '')
+        .replace(/RD\+/gi, '')
+        .replace(/\bRD\b/gi, '')
+        .replace(/\[TB\]/gi, '')
+        .replace(/TB\+/gi, '')
+        .replace(/\bTB\b/gi, '')
+        .trim();
   
-      // prefixa com ⚡ RD+
-      nameLines[0] = `⚡ RD+ ${cleaned}`.trim();
+      // prefixa com ⚡ RD+/TB+
+      nameLines[0] = `⚡ ${providerLabel}+ ${cleaned}`.trim();
   
       stream.name = nameLines.join('\n');
     }
   
-    // title: adiciona [RD+] e linha "Disponível no Real-Debrid" se necessário
+    // title: adiciona [RD+]/[TB+] e linha "Disponível no ..." se necessário
     if (typeof stream.title === 'string' && stream.title.length > 0) {
       const titleLines = stream.title.split('\n');
       const firstLine = titleLines[0] ?? '';
   
-      // garantir [RD+] no cabeçalho
-      if (!/\[RD\+\]/i.test(firstLine)) {
-        titleLines[0] = `${firstLine} [RD+]`.trim();
+      const badgeRegex = /\[(RD|TB)\+\]/i;
+      if (!badgeRegex.test(firstLine)) {
+        titleLines[0] = `${firstLine} [${providerLabel}+]`.trim();
       }
   
-      if (!titleLines.some((line) => /Disponível no Real-?Debrid/i.test(line))) {
-        titleLines.push('Disponível no Real-Debrid');
+      if (!titleLines.some((line) => new RegExp(`Dispon[ií]vel no ${providerName}`, 'i').test(line))) {
+        titleLines.push(`Disponível no ${providerName}`);
       }
   
       stream.title = titleLines.join('\n');
@@ -1423,5 +1461,3 @@ private mapTorrentToStream(
     return undefined;
   }
 }
-
-
