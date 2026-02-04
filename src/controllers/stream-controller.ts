@@ -195,7 +195,10 @@ export class StreamController {
       return stream.url;
     }
     if (stream.infoHash) {
-      return `magnet:?xt=urn:btih:${stream.infoHash}`;
+      const normalizedHash = stream.infoHash.trim().toLowerCase();
+      if (normalizedHash) {
+        return `magnet:?xt=urn:btih:${normalizedHash}`;
+      }
     }
     return undefined;
   }

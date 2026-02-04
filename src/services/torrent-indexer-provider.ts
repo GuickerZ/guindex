@@ -956,7 +956,7 @@ private mapTorrentToStream(
     this.extractInfoHash(magnet);
 
   if (typeof infoHash === 'string' && infoHash) {
-    stream.infoHash = infoHash;
+    stream.infoHash = infoHash.trim().toLowerCase();
   }
 
   if (size !== undefined) {

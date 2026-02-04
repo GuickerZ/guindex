@@ -84,7 +84,12 @@ export class StreamService {
     }
 
     // Add optional properties only if they exist
-    if (sourceStream.infoHash) metadata.infoHash = sourceStream.infoHash;
+    if (sourceStream.infoHash) {
+      const normalizedHash = sourceStream.infoHash.trim().toLowerCase();
+      if (normalizedHash) {
+        metadata.infoHash = normalizedHash;
+      }
+    }
     const externalUrl = StreamService.sanitizeExternalUrl(sourceStream.url);
     if (externalUrl) metadata.externalUrl = externalUrl;
     if (sourceStream.size !== undefined) metadata.size = sourceStream.size;
