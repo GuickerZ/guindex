@@ -244,7 +244,8 @@ export class TorboxClient {
     const res = await request(url.toString(), {
       headers: this.headers(),
       headersTimeout: this.requestTimeout,
-      bodyTimeout: this.requestTimeout
+      bodyTimeout: this.requestTimeout,
+      maxRedirections: 2
     });
     const location = res.headers['location'];
     const text = await res.body.text();

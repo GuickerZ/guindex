@@ -111,7 +111,6 @@ export class StreamController {
             delete meta.seeders;
             delete meta.quality;
             delete meta.releaseGroup;
-            delete meta.size;
           }
           return meta;
         })
@@ -256,8 +255,8 @@ export class StreamController {
     for (const [hash, relatedStreams] of pendingHashes.entries()) {
       const isCached = cachedHashes.has(hash);
       for (const stream of relatedStreams) {
-        if (stream.cached === undefined) {
-          stream.cached = isCached;
+        if (isCached) {
+          stream.cached = true;
         }
       }
     }

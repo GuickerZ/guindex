@@ -18,7 +18,7 @@ export class ConfigService {
     const torboxStreamLimit =
       Number(process.env.TORBOX_STREAM_LIMIT) && Number(process.env.TORBOX_STREAM_LIMIT) > 0
         ? Number(process.env.TORBOX_STREAM_LIMIT)
-        : 12;
+        : 15;
 
     // Debug logging for environment variables
     console.log('Environment variables:');
