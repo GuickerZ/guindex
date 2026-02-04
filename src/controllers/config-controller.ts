@@ -15,7 +15,8 @@ export class ConfigController {
       id: 'org.andre.brazuca-rd',
       version: '1.0.0',
       name: 'Brazuca RD',
-      description: 'Proxies Brazuca Torrents addon magnets through Real‑Debrid into direct streams. Credits: Brazuca Torrents addon author.',
+      description:
+        'Proxies Brazuca Torrents addon magnets through Real‑Debrid or Torbox into direct streams. Credits: Brazuca Torrents addon author.',
       catalogs: [],
       resources: ['stream'],
       types: ['movie', 'series'],
@@ -28,17 +29,38 @@ export class ConfigController {
       },
       config: [
         {
+          key: 'debridProvider',
+          type: 'select',
+          title: 'Debrid Provider',
+          description: 'Choose which premium provider will be used for playback.',
+          options: [
+            { value: 'realdebrid', label: 'Real-Debrid' },
+            { value: 'torbox', label: 'Torbox' }
+          ],
+          default: 'realdebrid'
+        },
+        {
           key: 'realdebridToken',
           type: 'text',
           title: 'Real-Debrid API Token',
           description: 'Your Real-Debrid API token for accessing premium links'
+        },
+        {
+          key: 'torboxToken',
+          type: 'text',
+          title: 'Torbox API Token',
+          description: 'Your Torbox API token for accessing premium links'
         }
       ]
     };
   }
 
-  generateConfigHTML(token?: string, isConfigured: boolean = false): string {
+  generateConfigHTML(
+    config?: { realdebridToken?: string; torboxToken?: string; debridProvider?: string },
+    isConfigured: boolean = false
+  ): string {
     const buttonText = isConfigured ? 'Save Configuration' : 'Install Addon';
+    const provider = config?.debridProvider ?? 'realdebrid';
     
     return `
 <!DOCTYPE html>
@@ -52,38 +74,62 @@ export class ConfigController {
     .form-group { margin-bottom: 20px; }
     label { display: block; margin-bottom: 5px; font-weight: bold; }
     input[type="text"] { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
+    select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
     .btn { background: #6c5ce7; color: white; padding: 12px 24px; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
     .btn:hover { background: #5a4fcf; }
     .info { background: #e8f4fd; padding: 15px; border-radius: 4px; margin-bottom: 20px; }
     .link { color: #6c5ce7; text-decoration: none; }
+    .helper { font-size: 13px; color: #666; margin-top: 6px; }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>🔗 Brazuca RD Configuration</h1>
     <div class="info">
-      <strong>Brazuca RD</strong> - Proxies Brazuca Torrents through Real-Debrid for direct streaming.<br>
+      <strong>Brazuca RD</strong> - Proxies Brazuca Torrents through Real-Debrid or Torbox for direct streaming.<br>
       <strong>Credits:</strong> <a href="https://94c8cb9f702d-brazuca-torrents.baby-beamup.club/" class="link" target="_blank">Brazuca Torrents addon</a>
     </div>
     <form id="configForm">
       <div class="form-group">
+        <label for="provider">Debrid Provider:</label>
+        <select id="provider">
+          <option value="realdebrid" ${provider === 'realdebrid' ? 'selected' : ''}>Real-Debrid</option>
+          <option value="torbox" ${provider === 'torbox' ? 'selected' : ''}>Torbox</option>
+        </select>
+        <div class="helper">Choose the provider that will process your magnets.</div>
+      </div>
+      <div class="form-group">
         <label for="rdToken">Real-Debrid API Token:</label>
-        <input type="text" id="rdToken" placeholder="Enter your Real-Debrid API token" value="${token || ''}" required>
+        <input type="text" id="rdToken" placeholder="Enter your Real-Debrid API token" value="${config?.realdebridToken || ''}">
+      </div>
+      <div class="form-group">
+        <label for="tbToken">Torbox API Token:</label>
+        <input type="text" id="tbToken" placeholder="Enter your Torbox API token" value="${config?.torboxToken || ''}">
       </div>
       <button type="submit" class="btn">${buttonText}</button>
     </form>
     <div style="margin-top: 20px; font-size: 14px; color: #666;">
       <strong>Get your Real-Debrid API token:</strong><br>
       <a href="https://real-debrid.com/apitoken" class="link" target="_blank">Real-Debrid API Token</a>
+      <br><br>
+      <strong>Get your Torbox API token:</strong><br>
+      <a href="https://torbox.app/" class="link" target="_blank">Torbox Account</a>
     </div>
   </div>
   <script>
     document.getElementById('configForm').addEventListener('submit', function(e) {
       e.preventDefault();
-      const token = document.getElementById('rdToken').value.trim();
+      const provider = document.getElementById('provider').value;
+      const rdToken = document.getElementById('rdToken').value.trim();
+      const tbToken = document.getElementById('tbToken').value.trim();
+      const token = provider === 'torbox' ? tbToken : rdToken;
       if (!token) return;
       
-      const installUrl = \`${this.config.baseUrl}/manifest.json?realdebridToken=\${encodeURIComponent(token)}\`;
+      const params = new URLSearchParams();
+      params.set('debridProvider', provider);
+      if (rdToken) params.set('realdebridToken', rdToken);
+      if (tbToken) params.set('torboxToken', tbToken);
+      const installUrl = \`${this.config.baseUrl}/manifest.json?\${params.toString()}\`;
       
       ${isConfigured ? `
       window.location.href = installUrl;

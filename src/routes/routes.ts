@@ -50,9 +50,12 @@ export function setupRoutes() {
    */
   fastify.all('/manifest.json', async (req, reply) => {
     const query = req.query as any;
-    const token = StreamService.extractRealDebridToken(query, req.headers);
+    const debridSelection = StreamService.resolveDebridSelection({
+      query,
+      headers: req.headers
+    });
 
-    const manifest = configController.createAddonManifest(!!token);
+    const manifest = configController.createAddonManifest(!!debridSelection.token);
     reply.send(manifest);
   });
 
@@ -61,17 +64,40 @@ export function setupRoutes() {
     const { token } = req.params as { token: string };
     const query = req.query as any;
 
-    // Valida token (precisa ter um tamanho mínimo, igual aos tokens do Real-Debrid)
-    const validToken = token && token.length > 20 ? token : undefined;
-    const manifest = configController.createAddonManifest(!!validToken);
+    const provider = StreamService.extractDebridProvider(query, req.headers);
+    const debridSelection = StreamService.resolveDebridSelection({
+      query,
+      headers: req.headers,
+      routeParams: { token },
+      extra: {
+        token,
+        torboxToken: provider === 'torbox' ? token : undefined,
+        debridProvider: provider
+      }
+    });
+    const manifest = configController.createAddonManifest(!!debridSelection.token);
     reply.send(manifest);
   });
 
   fastify.get('/configure', async (req, reply) => {
     const query = req.query as any;
-    const token = StreamService.extractRealDebridToken(query, req.headers);
+    const selection = StreamService.resolveDebridSelection({
+      query,
+      headers: req.headers
+    });
     
-    reply.type('text/html').send(configController.generateConfigHTML(token, true));
+    reply
+      .type('text/html')
+      .send(
+        configController.generateConfigHTML(
+          {
+            debridProvider: selection.provider,
+            realdebridToken: selection.realdebridToken,
+            torboxToken: selection.torboxToken
+          },
+          true
+        )
+      );
   });
 
   fastify.get('/', async (_req, reply) => {
@@ -82,11 +108,21 @@ export function setupRoutes() {
   fastify.all('/stream/:type/:id.json', async (req, reply) => {
     const { type, id } = req.params as any;
     const query = req.query as any;
-    const token = StreamService.extractRealDebridToken(query, req.headers);
+    const debridSelection = StreamService.resolveDebridSelection({
+      query,
+      headers: req.headers
+    });
 
     try {
-      const extra: { realdebridToken?: string } = {};
-      if (token) extra.realdebridToken = token;
+      const extra: { realdebridToken?: string; torboxToken?: string; debridProvider?: string } = {
+        debridProvider: debridSelection.provider
+      };
+      if (debridSelection.realdebridToken) {
+        extra.realdebridToken = debridSelection.realdebridToken;
+      }
+      if (debridSelection.torboxToken) {
+        extra.torboxToken = debridSelection.torboxToken;
+      }
 
       const result = await streamController.handleStreamRequest({ type, id, extra });
       reply.send(result);
@@ -101,11 +137,35 @@ export function setupRoutes() {
   fastify.all('/:token/stream/:type/:id.json', async (req, reply) => {
     const { token, type, id } = req.params as any;
     const query = req.query as any;
-    const realToken = StreamService.extractRealDebridToken(query, req.headers, {}, { token });
+    const provider = StreamService.extractDebridProvider(query, req.headers);
+    const debridSelection = StreamService.resolveDebridSelection({
+      query,
+      headers: req.headers,
+      routeParams: { token },
+      extra: {
+        token,
+        torboxToken: provider === 'torbox' ? token : undefined,
+        debridProvider: provider
+      }
+    });
 
     try {
-      const extra: { realdebridToken?: string } = {};
-      if (realToken) extra.realdebridToken = realToken;
+      const extra: {
+        realdebridToken?: string;
+        torboxToken?: string;
+        debridProvider?: string;
+        token?: string;
+      } = {
+        debridProvider: debridSelection.provider,
+        token,
+        torboxToken: provider === 'torbox' ? token : debridSelection.torboxToken
+      };
+      if (debridSelection.realdebridToken) {
+        extra.realdebridToken = debridSelection.realdebridToken;
+      }
+      if (debridSelection.torboxToken) {
+        extra.torboxToken = debridSelection.torboxToken;
+      }
 
       const result = await streamController.handleStreamRequest({ type, id, extra });
       reply.send(result);
@@ -127,11 +187,21 @@ export function setupRoutes() {
     reply: FastifyReply,
     token: string,
     magnet: string,
+    provider?: string,
     ctx?: string
   ) => {
     try {
       const context = StreamService.decodeStreamContext(ctx);
-      const directUrl = await streamController.processMagnetForPlayback(magnet, token, context);
+      const debridProvider = StreamService.extractDebridProvider(
+        { debridProvider: provider },
+        {}
+      );
+      const directUrl = await streamController.processMagnetForPlayback(
+        magnet,
+        token,
+        debridProvider ?? 'realdebrid',
+        context
+      );
       reply.redirect(directUrl);
     } catch (error) {
       logger.error(`Magnet processing error: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -142,6 +212,7 @@ export function setupRoutes() {
   type ResolveRouteValues = {
     token?: string | undefined;
     magnet?: string | undefined;
+    provider?: string | undefined;
     ctx?: string | undefined;
   };
 
@@ -158,7 +229,7 @@ export function setupRoutes() {
           return;
         }
 
-        const { token, magnet, ctx } = extractor(req);
+        const { token, magnet, provider, ctx } = extractor(req);
 
         if (!magnet) {
           reply.status(400).send({ error: 'Magnet link is required' });
@@ -166,23 +237,39 @@ export function setupRoutes() {
         }
 
         if (!token) {
-          reply.status(400).send({ error: 'Real-Debrid token is required' });
+          reply.status(400).send({ error: 'Debrid token is required' });
           return;
         }
-        await handleResolveRequest(reply, token, magnet, ctx);
+        await handleResolveRequest(reply, token, magnet, provider, ctx);
       }
     });
   };
 
   registerResolveRoute('/resolve', (req) => {
-    const query = req.query as { token?: string; magnet?: string; ctx?: string };
-    return { token: query.token, magnet: query.magnet, ctx: query.ctx };
+    const query = req.query as {
+      token?: string;
+      magnet?: string;
+      ctx?: string;
+      debridProvider?: string;
+      provider?: string;
+    };
+    return {
+      token: query.token,
+      magnet: query.magnet,
+      provider: query.debridProvider ?? query.provider,
+      ctx: query.ctx
+    };
   });
 
   registerResolveRoute('/resolve/:token/:magnet', (req) => {
     const params = req.params as { token?: string; magnet?: string };
-    const query = req.query as { ctx?: string };
-    return { token: params.token, magnet: params.magnet, ctx: query.ctx };
+    const query = req.query as { ctx?: string; debridProvider?: string; provider?: string };
+    return {
+      token: params.token,
+      magnet: params.magnet,
+      provider: query.debridProvider ?? query.provider,
+      ctx: query.ctx
+    };
   });
 
   fastify.get('/placeholder/downloading.mp4', async (_req, reply) => {
