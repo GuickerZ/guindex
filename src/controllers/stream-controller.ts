@@ -4,10 +4,12 @@
 
 import type { StremioStream, StreamRequest, StreamResponse } from '../models/stream-model.js';
 import type { SourceStream, StreamContext } from '../models/source-model.js';
+import type { DebridProvider } from '../models/debrid-model.js';
 import { RealDebridService } from '../services/realdebrid-service.js';
 import { SourceService } from '../services/source-service.js';
 import { StreamService } from '../services/stream-service.js';
 import { ConfigService } from '../services/config-service.js';
+import { TorboxService } from '../services/torbox-service.js';
 
 export class StreamController {
   private config = ConfigService.loadConfig();
@@ -20,15 +22,24 @@ export class StreamController {
       console.debug(`Processing stream request: ${type}/${id}`);
       
       // Fetch streams from all configured sources
-      const envToken = process.env.REALDEBRID_TOKEN;
-      const realDebridToken = StreamService.extractRealDebridToken(
-        {},
-        {},
+      const debridSelection = StreamService.resolveDebridSelection({
+        query: {},
+        headers: {},
         extra,
-        envToken ? { token: envToken } : undefined
-      );
-      const tokenForSources = realDebridToken ?? envToken;
-      const fetchOptions = tokenForSources ? { realdebridToken: tokenForSources } : undefined;
+        env: {
+          realdebridToken: process.env.REALDEBRID_TOKEN,
+          torboxToken: process.env.TORBOX_TOKEN
+        }
+      });
+      const selectedProvider = debridSelection.provider;
+      const selectedToken = debridSelection.token;
+      const fetchOptions = selectedToken
+        ? {
+            debridProvider: selectedProvider,
+            realdebridToken: selectedProvider === 'realdebrid' ? selectedToken : undefined,
+            torboxToken: selectedProvider === 'torbox' ? selectedToken : undefined
+          }
+        : undefined;
       const sourceStreams = await SourceService.fetchStreamsFromAllSources(type, id, fetchOptions);
       
       // Filter streams that have magnet links or infoHash
@@ -43,10 +54,10 @@ export class StreamController {
 
       console.debug(`Found ${processableStreams.length} streams with magnet links`);
 
-      await this.ensureRealDebridAvailability(processableStreams, tokenForSources);
+      await this.ensureDebridAvailability(processableStreams, selectedProvider, selectedToken);
 
-      if (!realDebridToken) {
-        console.debug('No Real-Debrid token provided, returning magnet fallback streams');
+      if (!selectedToken) {
+        console.debug('No debrid token provided, returning magnet fallback streams');
       }
 
       const streamMetadata: StremioStream[] = processableStreams
@@ -60,22 +71,24 @@ export class StreamController {
           const isCached = stream.cached ?? false;
           const commonOptions = {
             fallbackMagnet: magnet,
-            forceNotWebReady: !isCached || !realDebridToken,
-            realDebridReady: isCached
+            forceNotWebReady: !isCached || !selectedToken,
+            realDebridReady: selectedProvider === 'realdebrid' ? isCached : undefined,
+            torboxReady: selectedProvider === 'torbox' ? isCached : undefined,
+            debridProvider: selectedProvider ?? 'realdebrid'
           };
 
-          if (!realDebridToken) {
+          if (!selectedToken) {
             return StreamService.createStreamMetadata(stream, magnet, commonOptions);
           }
 
-          const apiUrl = this.buildResolveUrl(realDebridToken, magnet, stream.context);
+          const apiUrl = this.buildResolveUrl(selectedToken, magnet, stream.context, selectedProvider);
           return StreamService.createStreamMetadata(stream, apiUrl, commonOptions);
         })
         .filter((stream): stream is StremioStream => Boolean(stream));
 
       streamMetadata.sort((a, b) => {
-        const aReady = a.behaviorHints?.realDebridReady ? 1 : 0;
-        const bReady = b.behaviorHints?.realDebridReady ? 1 : 0;
+        const aReady = a.behaviorHints?.realDebridReady || a.behaviorHints?.torboxReady ? 1 : 0;
+        const bReady = b.behaviorHints?.realDebridReady || b.behaviorHints?.torboxReady ? 1 : 0;
         return bReady - aReady;
       });
 
@@ -89,18 +102,25 @@ export class StreamController {
   }
 
   /**
-   * Processes a magnet link through Real-Debrid when user actually plays the stream
+   * Processes a magnet link through the selected debrid provider when user actually plays the stream
    */
-  async processMagnetForPlayback(magnet: string, token: string, context?: StreamContext): Promise<string> {
+  async processMagnetForPlayback(
+    magnet: string,
+    token: string,
+    provider: DebridProvider = 'realdebrid',
+    context?: StreamContext
+  ): Promise<string> {
     if (!token) {
-      throw new Error('Real-Debrid token is required for playback');
+      throw new Error('Debrid token is required for playback');
     }
 
     try {
       console.debug(`Processing magnet for playback: ${magnet.substring(0, 50)}...`);
       
-      const rdService = new RealDebridService(token);
-      const directUrl = await rdService.processMagnetToDirectUrl(magnet, context);
+      const directUrl =
+        provider === 'torbox'
+          ? await new TorboxService(token).processMagnetToDirectUrl(magnet, context)
+          : await new RealDebridService(token).processMagnetToDirectUrl(magnet, context);
       
       console.debug(`Successfully processed magnet for playback: ${directUrl}`);
       return directUrl;
@@ -142,8 +162,9 @@ export class StreamController {
     return match[1].trim().toLowerCase();
   }
 
-  private async ensureRealDebridAvailability(
+  private async ensureDebridAvailability(
     streams: SourceStream[],
+    provider?: DebridProvider,
     token?: string
   ): Promise<void> {
     const pendingHashes = new Map<string, SourceStream[]>();
@@ -168,10 +189,12 @@ export class StreamController {
       return;
     }
 
-    const cachedHashes = await RealDebridService.fetchCachedInfoHashes(
-      [...pendingHashes.keys()],
-      token
-    );
+    let cachedHashes = new Set<string>();
+    if (provider === 'torbox') {
+      cachedHashes = await TorboxService.fetchCachedInfoHashes([...pendingHashes.keys()], token);
+    } else {
+      cachedHashes = await RealDebridService.fetchCachedInfoHashes([...pendingHashes.keys()], token);
+    }
 
     for (const [hash, relatedStreams] of pendingHashes.entries()) {
       const isCached = cachedHashes.has(hash);
@@ -183,13 +206,21 @@ export class StreamController {
     }
   }
 
-  private buildResolveUrl(token: string, magnet: string, context?: StreamContext): string {
+  private buildResolveUrl(
+    token: string,
+    magnet: string,
+    context?: StreamContext,
+    provider?: DebridProvider
+  ): string {
     const base = this.resolveBaseUrl.endsWith('/')
       ? this.resolveBaseUrl
       : `${this.resolveBaseUrl}/`;
     const url = new URL('resolve', base);
     url.searchParams.set('token', token);
     url.searchParams.set('magnet', magnet);
+    if (provider) {
+      url.searchParams.set('debridProvider', provider);
+    }
 
     const contextValue = StreamService.encodeStreamContext(context);
     if (contextValue) {

@@ -5,6 +5,7 @@
 export interface StremioStreamBehaviorHints {
   notWebReady?: boolean;
   realDebridReady?: boolean;
+  torboxReady?: boolean;
   fallbackMagnet?: string;
 }
 
@@ -29,7 +30,9 @@ export interface StreamRequest {
   type: string;
   id: string;
   extra?: {
+    debridProvider?: string;
     realdebridToken?: string;
+    torboxToken?: string;
     token?: string;
   };
 }
