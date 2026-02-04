@@ -2,6 +2,7 @@
  * Stream Service
  */
 
+import type { DebridProvider } from '../models/debrid-model.js';
 import type { SourceStream, StreamContext } from '../models/source-model.js';
 import type { StremioStream, StremioStreamBehaviorHints } from '../models/stream-model.js';
 
@@ -9,6 +10,8 @@ interface StreamMetadataOptions {
   fallbackMagnet?: string;
   forceNotWebReady?: boolean;
   realDebridReady?: boolean;
+  torboxReady?: boolean;
+  debridProvider?: DebridProvider;
 }
 
 export class StreamService {
@@ -18,12 +21,17 @@ export class StreamService {
     options?: StreamMetadataOptions
   ): StremioStream {
     const fallbackTitle = sourceStream.title || 'Unknown file';
+    const debridProvider = options?.debridProvider ?? 'realdebrid';
     const rdReady = options?.realDebridReady ?? sourceStream.cached ?? false;
-    const rdLabel = rdReady ? 'RD+' : 'RD';
-    const baseName = sourceStream.name || `[Brazuca RD] ${fallbackTitle}`;
+    const tbReady = options?.torboxReady ?? sourceStream.cached ?? false;
+    const isReady = debridProvider === 'torbox' ? tbReady : rdReady;
+    const providerLabel = debridProvider === 'torbox' ? 'TB' : 'RD';
+    const readyLabel =
+      debridProvider === 'torbox' ? (isReady ? `${providerLabel}⚡` : providerLabel) : isReady ? `${providerLabel}+` : providerLabel;
+    const baseName = sourceStream.name || `[Brazuca Debrid] ${fallbackTitle}`;
 
     const metadata: StremioStream = {
-      name: `[${rdLabel}] ${baseName}`,
+      name: `[${readyLabel}] ${baseName}`,
       title: fallbackTitle,
       url
     };
@@ -33,12 +41,33 @@ export class StreamService {
     if (shouldForceNotWebReady) {
       behaviorHints.notWebReady = true;
     }
-    behaviorHints.realDebridReady = rdReady;
+    if (debridProvider === 'torbox') {
+      behaviorHints.torboxReady = isReady;
+      const bingeGroup = StreamService.buildBingeGroup(sourceStream, debridProvider);
+      if (bingeGroup) {
+        behaviorHints.bingeGroup = bingeGroup;
+      }
+      if (sourceStream.fileName) {
+        behaviorHints.filename = sourceStream.fileName;
+      }
+      if (sourceStream.size !== undefined) {
+        behaviorHints.videoSize = sourceStream.size;
+      }
+    } else {
+      behaviorHints.realDebridReady = isReady;
+    }
     if (options?.fallbackMagnet) {
       behaviorHints.fallbackMagnet = options.fallbackMagnet;
     }
     if (Object.keys(behaviorHints).length > 0) {
       metadata.behaviorHints = behaviorHints;
+    }
+
+    if (debridProvider === 'torbox') {
+      const description = StreamService.buildTorboxDescription(sourceStream);
+      if (description) {
+        metadata.description = description;
+      }
     }
 
     // Add optional properties only if they exist
@@ -51,6 +80,62 @@ export class StreamService {
     if (sourceStream.releaseGroup) metadata.releaseGroup = sourceStream.releaseGroup;
 
     return metadata;
+  }
+
+  private static buildBingeGroup(stream: SourceStream, provider: DebridProvider): string | undefined {
+    const hash = stream.infoHash?.trim();
+    const source = stream.source?.trim();
+    if (!hash || !source) {
+      return undefined;
+    }
+
+    return `${source.toLowerCase()}|${provider}|${hash.toLowerCase()}`;
+  }
+
+  private static buildTorboxDescription(stream: SourceStream): string | undefined {
+    const fileName = stream.fileName || stream.title;
+    if (!fileName) {
+      return undefined;
+    }
+
+    const lines: string[] = [];
+    lines.push(`📄 ${fileName}`);
+
+    const infoParts: string[] = [];
+    if (stream.quality) {
+      infoParts.push(stream.quality);
+    }
+    if (stream.releaseGroup) {
+      infoParts.push(stream.releaseGroup);
+    }
+    if (infoParts.length > 0) {
+      lines.push(`⭐ ${infoParts.join(' • ')}`);
+    }
+
+    if (stream.size !== undefined) {
+      lines.push(`💾 ${StreamService.formatBytes(stream.size)}`);
+    }
+
+    if (stream.source) {
+      lines.push(`🔎 ${stream.source}`);
+    }
+
+    return lines.join('\n');
+  }
+
+  private static formatBytes(bytes: number): string {
+    if (!Number.isFinite(bytes) || bytes <= 0) {
+      return '0 B';
+    }
+
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let size = bytes;
+    let unitIndex = 0;
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex += 1;
+    }
+    return `${size.toFixed(size >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
   }
 
   private static sanitizeExternalUrl(url?: string): string | undefined {
@@ -139,5 +224,78 @@ export class StreamService {
       return token;
     }
     return undefined;
+  }
+
+  static extractTorboxToken(
+    query: any,
+    headers: any,
+    extra?: { torboxToken?: string }
+  ): string | undefined {
+    const token =
+      query.torboxToken ||
+      query.tbToken ||
+      headers['x-tb-token'] ||
+      headers['x-torbox-token'] ||
+      extra?.torboxToken;
+
+    if (token && token.length > 10) {
+      return token;
+    }
+    return undefined;
+  }
+
+  static extractDebridProvider(query: any, headers: any, extra?: { debridProvider?: string }): DebridProvider | undefined {
+    const provider =
+      query.debridProvider ||
+      query.provider ||
+      query.debrid ||
+      headers['x-debrid-provider'] ||
+      extra?.debridProvider;
+
+    if (!provider || typeof provider !== 'string') {
+      return undefined;
+    }
+
+    const normalized = provider.toLowerCase();
+    if (normalized === 'torbox') {
+      return 'torbox';
+    }
+    if (normalized === 'realdebrid' || normalized === 'real-debrid' || normalized === 'rd') {
+      return 'realdebrid';
+    }
+    return undefined;
+  }
+
+  static resolveDebridSelection(params: {
+    query: any;
+    headers: any;
+    extra?: { debridProvider?: string; realdebridToken?: string; torboxToken?: string; token?: string };
+    routeParams?: { token?: string };
+    env?: { realdebridToken?: string; torboxToken?: string };
+  }): { provider?: DebridProvider; token?: string; realdebridToken?: string; torboxToken?: string } {
+    const { query, headers, extra, routeParams, env } = params;
+    const provider = this.extractDebridProvider(query, headers, extra);
+    const realdebridToken =
+      this.extractRealDebridToken(query, headers, extra, routeParams) || env?.realdebridToken;
+    const torboxToken =
+      this.extractTorboxToken(query, headers, extra) || env?.torboxToken;
+
+    if (provider === 'torbox') {
+      return { provider, token: torboxToken, realdebridToken, torboxToken };
+    }
+
+    if (provider === 'realdebrid') {
+      return { provider, token: realdebridToken, realdebridToken, torboxToken };
+    }
+
+    if (realdebridToken) {
+      return { provider: 'realdebrid', token: realdebridToken, realdebridToken, torboxToken };
+    }
+
+    if (torboxToken) {
+      return { provider: 'torbox', token: torboxToken, realdebridToken, torboxToken };
+    }
+
+    return { provider: provider, realdebridToken, torboxToken };
   }
 }
