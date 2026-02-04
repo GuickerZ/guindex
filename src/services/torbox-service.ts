@@ -92,7 +92,8 @@ export class TorboxService {
         const info = await this.client.getTorrent(torrent_id);
         const ready = this.isReady(info);
         const file = this.selectBestFile(info.files || [], context);
-        if (ready && file?.id !== undefined) {
+        if (!file?.id) return undefined;
+        if (ready) {
           const link = await this.safeCall(() =>
             this.client.requestDownloadLink({ torrentId: torrent_id, fileId: file.id })
           );
@@ -103,16 +104,12 @@ export class TorboxService {
         return undefined;
       };
 
-      const immediate = await attempt();
-      if (immediate) return immediate;
-
-      await this.sleep(2000);
-      const retry = await attempt();
-      if (retry) return retry;
-
-      await this.sleep(3000);
-      const retry2 = await attempt();
-      if (retry2) return retry2;
+      const attemptDelays = [0, 1000, 2500]; // faster second click (~2-3s total)
+      for (const delay of attemptDelays) {
+        if (delay > 0) await this.sleep(delay);
+        const res = await attempt();
+        if (res) return res;
+      }
 
       return this.placeholderResult();
     } catch {
@@ -174,7 +171,10 @@ export class TorboxService {
       info.download_present === true ||
       info.download_finished === true ||
       state === 'cached' ||
-      state === 'completed'
+      state === 'completed' ||
+      (info.files && info.files.length > 0) ||
+      (info as any).availability > 0 ||
+      (info as any).progress >= 100
     );
   }
 
