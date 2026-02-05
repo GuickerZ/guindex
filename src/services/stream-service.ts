@@ -95,7 +95,7 @@ export class StreamService {
     const shouldForceNotWebReady = options?.forceNotWebReady ?? true;
     const hintFileName = displayFileName || sourceStream.fileName;
     if (hintFileName) {
-      behaviorHints.filename = hintFileName;
+      behaviorHints.filename = StreamService.appendLanguageToFilename(hintFileName, normalizedLanguages);
     }
     if (sourceStream.size != undefined) {
       behaviorHints.videoSize = sourceStream.size;
@@ -240,13 +240,51 @@ export class StreamService {
     return codes;
   }
 
-  // no filename mutation needed; kept for future use
-  private static appendLanguageToFilename(
-    filename: string,
-    _languageTag?: string,
-    _languageCodes?: string[]
-  ): string {
-    return filename;
+  private static appendLanguageToFilename(filename: string, languages: string[]): string {
+    if (!filename || !Array.isArray(languages) || languages.length === 0) {
+      return filename;
+    }
+
+    const tokens = StreamService.languageTokens(languages);
+    if (tokens.length === 0) {
+      return filename;
+    }
+
+    const suffix = ` (${tokens.join(', ')})`;
+
+    // avoid duplicate if already contains the exact suffix
+    if (filename.toLowerCase().includes(suffix.toLowerCase())) {
+      return filename;
+    }
+
+    const lastDot = filename.lastIndexOf('.');
+    if (lastDot > 0 && lastDot < filename.length - 1) {
+      const base = filename.slice(0, lastDot);
+      const ext = filename.slice(lastDot);
+      return `${base}${suffix}${ext}`;
+    }
+
+    return `${filename}${suffix}`;
+  }
+
+  private static languageTokens(languages: string[]): string[] {
+    const norm = (v: string) => StreamService.normalizeLanguageKey(v);
+    const tokens: string[] = [];
+    for (const lang of languages) {
+      const k = norm(lang);
+      if (['portuguese', 'brazilian', 'pt-br', 'ptbr', 'pt', 'dublado', 'dublada'].includes(k)) tokens.push('brazilian');
+      else if (['english', 'eng', 'en'].includes(k)) tokens.push('eng');
+      else if (['spanish', 'espanol', 'español', 'es', 'latino', 'castellano'].includes(k)) tokens.push('spa');
+      else if (['french', 'frances', 'fr'].includes(k)) tokens.push('fre');
+      else if (['italian', 'italiano', 'it'].includes(k)) tokens.push('ita');
+      else if (['german', 'alemao', 'de'].includes(k)) tokens.push('ger');
+      else if (['japanese', 'japones', 'jp'].includes(k)) tokens.push('jpn');
+      else if (['korean', 'coreano', 'kr', 'ko'].includes(k)) tokens.push('kor');
+      else if (['chinese', 'chines', 'zh', 'mandarin'].includes(k)) tokens.push('chi');
+      else if (['russian', 'russo', 'ru'].includes(k)) tokens.push('rus');
+      else if (['hindi', 'hi'].includes(k)) tokens.push('hin');
+    }
+    return Array.from(new Set(tokens));
   }
 
   private static pickFolderName(filename: string): string | undefined {
