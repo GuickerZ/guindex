@@ -78,13 +78,18 @@ export class StreamService {
           : providerLabel;
     const baseName = sourceStream.name || `[Brazuca Debrid] ${displayTitle}`;
 
-    const displayName =
+    const sourceLabel = StreamService.pickIndexer(sourceStream, undefined, url);
+
+    let displayName =
       debridProvider === 'torbox'
         ? `[${readyLabel}] ${StreamService.buildTorboxName(sourceStream, displayTitle)}`
         : `[${readyLabel}] ${baseName}`;
+    if (sourceLabel) {
+      displayName = `${displayName} • ${sourceLabel}`;
+    }
     const metadata: StremioStream = {
       name: displayName,
-      title: displayTitle,
+      title: sourceLabel ? `${displayTitle} • ${sourceLabel}` : displayTitle,
       url
     };
     if (normalizedLanguages.length > 0) {
@@ -133,8 +138,8 @@ export class StreamService {
       metadata.folderName = StreamService.pickFolderName(finalFilename);
     }
 
-    const sourceLabel = StreamService.pickIndexer(sourceStream, behaviorHints, url);
-    if (sourceLabel) metadata.indexer = sourceLabel;
+    const sourceLabelMeta = StreamService.pickIndexer(sourceStream, behaviorHints, url);
+    if (sourceLabelMeta) metadata.indexer = sourceLabelMeta;
 
     if (sourceStream.size != undefined) metadata.size = sourceStream.size;
     if (sourceStream.seeders != undefined) metadata.seeders = sourceStream.seeders;
