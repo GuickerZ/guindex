@@ -62,7 +62,6 @@ export class StreamService {
     const displayFileName = StreamService.pickDisplayFileName(sourceStream);
     const fallbackTitle = displayFileName || sourceStream.title || 'Unknown file';
     let displayTitle = displayFileName || sourceStream.title || fallbackTitle;
-    const sourceLabel = StreamService.buildSourceLabel(sourceStream.source);
     const normalizedLanguages = StreamService.normalizeLanguages(sourceStream.languages);
     const languageTag = StreamService.buildLanguageTag(normalizedLanguages);
     const languageCodes = StreamService.buildLanguageCodes(normalizedLanguages);
@@ -88,10 +87,6 @@ export class StreamService {
       debridProvider === 'torbox'
         ? `[${readyLabel}] ${StreamService.buildTorboxName(sourceStream, displayTitle)}`
         : `[${readyLabel}] ${baseName}`;
-    if (sourceLabel) {
-      displayName = `${displayName} • ${sourceLabel}`;
-      displayTitle = `${displayTitle} • ${sourceLabel}`;
-    }
     if (languageTag) {
       displayName = StreamService.appendLanguageTag(displayName, languageTag);
     }
@@ -137,16 +132,6 @@ export class StreamService {
       metadata.behaviorHints = behaviorHints;
     }
 
-    if (debridProvider === 'torbox') {
-      const description = StreamService.buildTorboxDescription(sourceStream);
-      if (description) {
-        metadata.description = description;
-      }
-      if (!isReady && !metadata.description) {
-        metadata.description = 'Baixando no TorBox - aguarde alguns segundos e tente novamente.';
-      }
-    }
-
     // Add optional properties only if they exist
     if (sourceStream.infoHash) {
       const normalizedHash = sourceStream.infoHash.trim().toLowerCase();
@@ -154,12 +139,9 @@ export class StreamService {
         metadata.infoHash = normalizedHash;
       }
     }
-    const externalUrl = StreamService.sanitizeExternalUrl(sourceStream.detailUrl ?? sourceStream.url);
-    if (externalUrl) metadata.externalUrl = externalUrl;
     if (sourceStream.size != undefined) metadata.size = sourceStream.size;
     if (sourceStream.seeders != undefined) metadata.seeders = sourceStream.seeders;
     if (sourceStream.quality) metadata.quality = sourceStream.quality;
-    if (sourceStream.releaseGroup) metadata.releaseGroup = sourceStream.releaseGroup;
 
     return metadata;
   }
@@ -231,19 +213,35 @@ export class StreamService {
   }
 
   private static buildSourceLabel(source?: string): string | undefined {
-    if (!source) return undefined;
-    const cleaned = source.trim();
-    if (!cleaned) return undefined;
-    // keep it short for UI
-    return cleaned.length > 28 ? `${cleaned.slice(0, 25)}…` : cleaned;
+    // no longer used (kept for potential future need)
+    return source?.trim() || undefined;
   }
 
   private static buildLanguageCodes(languages: string[]): string[] {
-    const hasPt = languages.some((l) => ['portuguese', 'brazilian', 'pt-br', 'ptbr', 'pt'].includes(StreamService.normalizeLanguageKey(l)));
+    const hasPt = languages.some((l) => ['portuguese', 'brazilian', 'pt-br', 'ptbr', 'pt','dublado'].includes(StreamService.normalizeLanguageKey(l)));
     const hasEn = languages.some((l) => ['english', 'eng', 'en'].includes(StreamService.normalizeLanguageKey(l)));
+    const hasEs = languages.some((l) => ['spanish', 'espanol', 'español', 'es'].includes(StreamService.normalizeLanguageKey(l)));
+    const hasFr = languages.some((l) => ['french', 'frances', 'fr'].includes(StreamService.normalizeLanguageKey(l)));
+    const hasIt = languages.some((l) => ['italian', 'italiano', 'it'].includes(StreamService.normalizeLanguageKey(l)));
+    const hasDe = languages.some((l) => ['german', 'alemao', 'de'].includes(StreamService.normalizeLanguageKey(l)));
+    const hasJa = languages.some((l) => ['japanese', 'japones', 'jp'].includes(StreamService.normalizeLanguageKey(l)));
+    const hasKo = languages.some((l) => ['korean', 'coreano', 'kr', 'ko'].includes(StreamService.normalizeLanguageKey(l)));
+    const hasZh = languages.some((l) => ['chinese', 'chines', 'zh', 'mandarin'].includes(StreamService.normalizeLanguageKey(l)));
+    const hasRu = languages.some((l) => ['russian', 'russo', 'ru'].includes(StreamService.normalizeLanguageKey(l)));
+    const hasHi = languages.some((l) => ['hindi', 'hi'].includes(StreamService.normalizeLanguageKey(l)));
+
     const codes: string[] = [];
-    if (hasPt) codes.push('PTBR');
-    if (hasEn) codes.push('ENG');
+    if (hasPt) codes.push('PT');
+    if (hasEn) codes.push('EN');
+    if (hasEs) codes.push('ES');
+    if (hasFr) codes.push('FR');
+    if (hasIt) codes.push('IT');
+    if (hasDe) codes.push('DE');
+    if (hasJa) codes.push('JA');
+    if (hasKo) codes.push('KO');
+    if (hasZh) codes.push('ZH');
+    if (hasRu) codes.push('RU');
+    if (hasHi) codes.push('HI');
     return codes;
   }
 
