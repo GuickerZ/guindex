@@ -81,12 +81,23 @@ function normalizeStream(stream: SourceStream, providerLabel: string): SourceStr
   const hints = (stream as any)?.behaviorHints as
     | { filename?: string; videoSize?: number; bingeGroup?: string }
     | undefined;
-  const lines = collectLines(stream.title, stream.description, stream.name);
+
+  // collect lines early for filename detection
+  let lines = collectLines(stream.title, stream.description, stream.name);
 
   const fileName = pickFileName(result.fileName, hints?.filename, lines);
   if (fileName) {
     result.fileName = fileName;
   }
+
+  // refresh lines to include resolved filename for language/source parsing
+  lines = collectLines(
+    stream.title,
+    stream.description,
+    stream.name,
+    result.fileName,
+    hints?.filename
+  );
 
   const detailUrl = pickDetailUrl((stream as any)?.externalUrl, result.detailUrl, result.url, lines);
   if (detailUrl) {
