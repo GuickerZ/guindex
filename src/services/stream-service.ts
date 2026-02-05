@@ -133,7 +133,7 @@ export class StreamService {
       metadata.folderName = StreamService.pickFolderName(finalFilename);
     }
 
-    const sourceLabel = StreamService.buildSourceLabel(sourceStream.source);
+    const sourceLabel = StreamService.pickIndexer(sourceStream, behaviorHints, url);
     if (sourceLabel) metadata.indexer = sourceLabel;
 
     if (sourceStream.size != undefined) metadata.size = sourceStream.size;
@@ -206,12 +206,6 @@ export class StreamService {
     return 0;
   }
 
-  private static buildSourceLabel(source?: string): string | undefined {
-    if (!source) return undefined;
-    const cleaned = source.trim();
-    return cleaned || undefined;
-  }
-
   private static buildLanguageCodes(languages: string[]): string[] {
     const hasPt = languages.some((l) => ['portuguese', 'brazilian', 'pt-br', 'ptbr', 'pt','dublado'].includes(StreamService.normalizeLanguageKey(l)));
     const hasEn = languages.some((l) => ['english', 'eng', 'en'].includes(StreamService.normalizeLanguageKey(l)));
@@ -250,7 +244,6 @@ export class StreamService {
       return filename;
     }
 
-    // add DUAL marker when more than one language
     if (codes.length > 1 && !codes.includes('DUAL')) {
       codes.push('DUAL');
     }
@@ -260,19 +253,12 @@ export class StreamService {
     const ext = lastDot > 0 && lastDot < filename.length - 1 ? filename.slice(lastDot) : '';
 
     const upperBase = base.toUpperCase();
-    const toAppend: string[] = [];
-    for (const code of codes) {
-      const needle = `.${code.toUpperCase()}`;
-      if (!upperBase.includes(needle)) {
-        toAppend.push(code);
-      }
-    }
-
-    if (toAppend.length === 0) {
+    const missing = codes.filter((code) => !new RegExp(`\\b${code}\\b`, 'i').test(upperBase));
+    if (missing.length === 0) {
       return filename;
     }
 
-    const newBase = `${base}.${toAppend.join('.')}`;
+    const newBase = `${base} ${missing.join(' ')}`;
     return `${newBase}${ext}`;
   }
 
@@ -305,6 +291,39 @@ export class StreamService {
       return name.slice(0, lastDot);
     }
     return name;
+  }
+
+  private static pickIndexer(
+    stream: SourceStream,
+    behaviorHints: StremioStreamBehaviorHints,
+    url: string
+  ): string | undefined {
+    if (stream.source && stream.source.trim()) {
+      return stream.source.trim();
+    }
+
+    if (behaviorHints.bingeGroup) {
+      const parts = behaviorHints.bingeGroup.split('|');
+      if (parts[0]) return parts[0];
+    }
+
+    const host =
+      StreamService.extractHost(stream.detailUrl) ||
+      StreamService.extractHost(stream.url) ||
+      StreamService.extractHost(url);
+    if (host) return host;
+
+    return undefined;
+  }
+
+  private static extractHost(raw?: string): string | undefined {
+    if (!raw) return undefined;
+    try {
+      const u = new URL(raw);
+      return u.hostname.replace(/^www\./i, '');
+    } catch {
+      return undefined;
+    }
   }
 
   private static buildBingeGroup(stream: SourceStream, provider: DebridProvider): string | undefined {
