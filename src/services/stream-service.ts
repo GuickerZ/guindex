@@ -135,6 +135,9 @@ export class StreamService {
 
     const sourceLabel = StreamService.pickIndexer(sourceStream, behaviorHints, url);
     if (sourceLabel) metadata.indexer = sourceLabel;
+    if (!metadata.releaseGroup && sourceLabel) {
+      metadata.releaseGroup = sourceLabel;
+    }
 
     if (sourceStream.size != undefined) metadata.size = sourceStream.size;
     if (sourceStream.seeders != undefined) metadata.seeders = sourceStream.seeders;
