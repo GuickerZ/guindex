@@ -24,6 +24,7 @@ export interface StremioStream {
   seeders?: number;
   quality?: string;
   releaseGroup?: string;
+  languages?: string[];
 }
 
 export interface StreamResponse {

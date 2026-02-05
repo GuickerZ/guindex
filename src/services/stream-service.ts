@@ -6,6 +6,45 @@ import type { DebridProvider } from '../models/debrid-model.js';
 import type { SourceStream, StreamContext } from '../models/source-model.js';
 import type { StremioStream, StremioStreamBehaviorHints } from '../models/stream-model.js';
 
+const LANGUAGE_DISPLAY_ALIASES: Record<string, string> = {
+  portuguese: 'Portuguese',
+  portugues: 'Portuguese',
+  'pt-br': 'Portuguese',
+  'pt br': 'Portuguese',
+  ptbr: 'Portuguese',
+  brazilian: 'Portuguese',
+  'brazilian portuguese': 'Portuguese',
+  dublado: 'Portuguese',
+  dublada: 'Portuguese',
+  english: 'English',
+  ingles: 'English',
+  eng: 'English',
+  spanish: 'Spanish',
+  espanhol: 'Spanish',
+  espanol: 'Spanish',
+  castellano: 'Spanish',
+  latino: 'Spanish',
+  french: 'French',
+  frances: 'French',
+  italian: 'Italian',
+  italiano: 'Italian',
+  german: 'German',
+  alemao: 'German',
+  japanese: 'Japanese',
+  japones: 'Japanese',
+  korean: 'Korean',
+  coreano: 'Korean',
+  chinese: 'Chinese',
+  chines: 'Chinese',
+  mandarin: 'Chinese',
+  mandarim: 'Chinese',
+  russian: 'Russian',
+  russo: 'Russian',
+  hindi: 'Hindi',
+  arabic: 'Arabic',
+  arabe: 'Arabic'
+};
+
 interface StreamMetadataOptions {
   fallbackMagnet?: string;
   forceNotWebReady?: boolean;
@@ -22,7 +61,12 @@ export class StreamService {
   ): StremioStream {
     const displayFileName = StreamService.pickDisplayFileName(sourceStream);
     const fallbackTitle = displayFileName || sourceStream.title || 'Unknown file';
-    const displayTitle = displayFileName || sourceStream.title || fallbackTitle;
+    let displayTitle = displayFileName || sourceStream.title || fallbackTitle;
+    const normalizedLanguages = StreamService.normalizeLanguages(sourceStream.languages);
+    const languageTag = StreamService.buildLanguageTag(normalizedLanguages);
+    if (languageTag) {
+      displayTitle = StreamService.appendLanguageTag(displayTitle, languageTag);
+    }
     const debridProvider = options?.debridProvider ?? 'realdebrid';
     const rdReady = options?.realDebridReady ?? sourceStream.cached ?? false;
     const tbReady = options?.torboxReady ?? sourceStream.cached ?? false;
@@ -38,15 +82,21 @@ export class StreamService {
           : providerLabel;
     const baseName = sourceStream.name || `[Brazuca Debrid] ${displayTitle}`;
 
-    const displayName =
+    let displayName =
       debridProvider === 'torbox'
         ? `[${readyLabel}] ${StreamService.buildTorboxName(sourceStream, displayTitle)}`
         : `[${readyLabel}] ${baseName}`;
+    if (languageTag) {
+      displayName = StreamService.appendLanguageTag(displayName, languageTag);
+    }
     const metadata: StremioStream = {
       name: displayName,
       title: displayTitle,
       url
     };
+    if (normalizedLanguages.length > 0) {
+      metadata.languages = normalizedLanguages;
+    }
 
     const behaviorHints: StremioStreamBehaviorHints = {};
     const shouldForceNotWebReady = options?.forceNotWebReady ?? true;
@@ -102,6 +152,58 @@ export class StreamService {
     if (sourceStream.releaseGroup) metadata.releaseGroup = sourceStream.releaseGroup;
 
     return metadata;
+  }
+
+  private static buildLanguageTag(languages?: string[]): string | undefined {
+    const canonical = StreamService.normalizeLanguages(languages);
+    if (canonical.length === 0) {
+      return undefined;
+    }
+    return canonical.join('/');
+  }
+
+  private static appendLanguageTag(value: string, tag: string): string {
+    if (!value) {
+      return value;
+    }
+    const marker = `[${tag}]`;
+    if (value.includes(marker)) {
+      return value;
+    }
+    return `${value} ${marker}`.trim();
+  }
+
+  private static normalizeLanguageKey(value: string): string {
+    return value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim();
+  }
+
+  private static normalizeLanguages(languages?: string[]): string[] {
+    if (!Array.isArray(languages)) {
+      return [];
+    }
+
+    const tagMap = new Map<string, string>();
+    for (const language of languages) {
+      if (typeof language !== 'string') {
+        continue;
+      }
+      const trimmed = language.trim();
+      if (!trimmed) {
+        continue;
+      }
+      const key = StreamService.normalizeLanguageKey(trimmed);
+      const canonical = LANGUAGE_DISPLAY_ALIASES[key] ?? trimmed;
+      const canonicalKey = StreamService.normalizeLanguageKey(canonical);
+      if (canonicalKey) {
+        tagMap.set(canonicalKey, canonical);
+      }
+    }
+
+    return Array.from(tagMap.values());
   }
 
   private static buildBingeGroup(stream: SourceStream, provider: DebridProvider): string | undefined {
