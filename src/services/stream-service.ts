@@ -203,7 +203,21 @@ export class StreamService {
       }
     }
 
-    return Array.from(tagMap.values());
+    const ordered = Array.from(tagMap.values()).sort((a, b) => {
+      const pa = StreamService.languagePriority(a);
+      const pb = StreamService.languagePriority(b);
+      if (pa !== pb) return pb - pa; // higher priority first
+      return a.localeCompare(b);
+    });
+
+    return ordered;
+  }
+
+  private static languagePriority(value: string): number {
+    const key = StreamService.normalizeLanguageKey(value);
+    if (['portuguese', 'brazilian', 'pt-br', 'ptbr', 'pt'].includes(key)) return 100;
+    if (['english', 'eng', 'en'].includes(key)) return 90;
+    return 0;
   }
 
   private static buildBingeGroup(stream: SourceStream, provider: DebridProvider): string | undefined {
