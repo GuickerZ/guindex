@@ -61,13 +61,8 @@ export class StreamService {
   ): StremioStream {
     const displayFileName = StreamService.pickDisplayFileName(sourceStream);
     const fallbackTitle = displayFileName || sourceStream.title || 'Unknown file';
-    let displayTitle = displayFileName || sourceStream.title || fallbackTitle;
+    const displayTitle = displayFileName || sourceStream.title || fallbackTitle;
     const normalizedLanguages = StreamService.normalizeLanguages(sourceStream.languages);
-    const languageTag = StreamService.buildLanguageTag(normalizedLanguages);
-    const languageCodes = StreamService.buildLanguageCodes(normalizedLanguages);
-    if (languageTag) {
-      displayTitle = StreamService.appendLanguageTag(displayTitle, languageTag);
-    }
     const debridProvider = options?.debridProvider ?? 'realdebrid';
     const rdReady = options?.realDebridReady ?? sourceStream.cached ?? false;
     const tbReady = options?.torboxReady ?? sourceStream.cached ?? false;
@@ -83,13 +78,10 @@ export class StreamService {
           : providerLabel;
     const baseName = sourceStream.name || `[Brazuca Debrid] ${displayTitle}`;
 
-    let displayName =
+    const displayName =
       debridProvider === 'torbox'
         ? `[${readyLabel}] ${StreamService.buildTorboxName(sourceStream, displayTitle)}`
         : `[${readyLabel}] ${baseName}`;
-    if (languageTag) {
-      displayName = StreamService.appendLanguageTag(displayName, languageTag);
-    }
     const metadata: StremioStream = {
       name: displayName,
       title: displayTitle,
@@ -103,11 +95,7 @@ export class StreamService {
     const shouldForceNotWebReady = options?.forceNotWebReady ?? true;
     const hintFileName = displayFileName || sourceStream.fileName;
     if (hintFileName) {
-      behaviorHints.filename = StreamService.appendLanguageToFilename(
-        hintFileName,
-        languageTag,
-        languageCodes
-      );
+      behaviorHints.filename = hintFileName;
     }
     if (sourceStream.size != undefined) {
       behaviorHints.videoSize = sourceStream.size;
@@ -157,11 +145,7 @@ export class StreamService {
   }
 
   private static buildLanguageTag(languages?: string[]): string | undefined {
-    const canonical = StreamService.normalizeLanguages(languages);
-    if (canonical.length === 0) {
-      return undefined;
-    }
-    return canonical.join('/');
+    return undefined; // we no longer append tags to name/title
   }
 
   private static appendLanguageTag(value: string, tag: string): string {
@@ -256,30 +240,13 @@ export class StreamService {
     return codes;
   }
 
+  // no filename mutation needed; kept for future use
   private static appendLanguageToFilename(
     filename: string,
-    languageTag?: string,
-    languageCodes?: string[]
+    _languageTag?: string,
+    _languageCodes?: string[]
   ): string {
-    if (!filename || !languageTag) {
-      return filename;
-    }
-
-    // avoid duplicating tag
-    if (filename.includes(`[${languageTag}]`)) {
-      return filename;
-    }
-
-    const codes = languageCodes && languageCodes.length > 0 ? ` ${languageCodes.join('.')}` : '';
-
-    const lastDot = filename.lastIndexOf('.');
-    if (lastDot > 0 && lastDot < filename.length - 1) {
-      const base = filename.slice(0, lastDot);
-      const ext = filename.slice(lastDot);
-      return `${base}${codes} [${languageTag}]${ext}`;
-    }
-
-    return `${filename}${codes} [${languageTag}]`;
+    return filename;
   }
 
   private static pickFolderName(filename: string): string | undefined {
