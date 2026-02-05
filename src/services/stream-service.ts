@@ -62,8 +62,10 @@ export class StreamService {
     const displayFileName = StreamService.pickDisplayFileName(sourceStream);
     const fallbackTitle = displayFileName || sourceStream.title || 'Unknown file';
     let displayTitle = displayFileName || sourceStream.title || fallbackTitle;
+    const sourceLabel = StreamService.buildSourceLabel(sourceStream.source);
     const normalizedLanguages = StreamService.normalizeLanguages(sourceStream.languages);
     const languageTag = StreamService.buildLanguageTag(normalizedLanguages);
+    const languageCodes = StreamService.buildLanguageCodes(normalizedLanguages);
     if (languageTag) {
       displayTitle = StreamService.appendLanguageTag(displayTitle, languageTag);
     }
@@ -86,6 +88,10 @@ export class StreamService {
       debridProvider === 'torbox'
         ? `[${readyLabel}] ${StreamService.buildTorboxName(sourceStream, displayTitle)}`
         : `[${readyLabel}] ${baseName}`;
+    if (sourceLabel) {
+      displayName = `${displayName} • ${sourceLabel}`;
+      displayTitle = `${displayTitle} • ${sourceLabel}`;
+    }
     if (languageTag) {
       displayName = StreamService.appendLanguageTag(displayName, languageTag);
     }
@@ -102,7 +108,11 @@ export class StreamService {
     const shouldForceNotWebReady = options?.forceNotWebReady ?? true;
     const hintFileName = displayFileName || sourceStream.fileName;
     if (hintFileName) {
-      behaviorHints.filename = StreamService.appendLanguageToFilename(hintFileName, languageTag);
+      behaviorHints.filename = StreamService.appendLanguageToFilename(
+        hintFileName,
+        languageTag,
+        languageCodes
+      );
     }
     if (sourceStream.size != undefined) {
       behaviorHints.videoSize = sourceStream.size;
@@ -220,7 +230,28 @@ export class StreamService {
     return 0;
   }
 
-  private static appendLanguageToFilename(filename: string, languageTag?: string): string {
+  private static buildSourceLabel(source?: string): string | undefined {
+    if (!source) return undefined;
+    const cleaned = source.trim();
+    if (!cleaned) return undefined;
+    // keep it short for UI
+    return cleaned.length > 28 ? `${cleaned.slice(0, 25)}…` : cleaned;
+  }
+
+  private static buildLanguageCodes(languages: string[]): string[] {
+    const hasPt = languages.some((l) => ['portuguese', 'brazilian', 'pt-br', 'ptbr', 'pt'].includes(StreamService.normalizeLanguageKey(l)));
+    const hasEn = languages.some((l) => ['english', 'eng', 'en'].includes(StreamService.normalizeLanguageKey(l)));
+    const codes: string[] = [];
+    if (hasPt) codes.push('PTBR');
+    if (hasEn) codes.push('ENG');
+    return codes;
+  }
+
+  private static appendLanguageToFilename(
+    filename: string,
+    languageTag?: string,
+    languageCodes?: string[]
+  ): string {
     if (!filename || !languageTag) {
       return filename;
     }
@@ -230,14 +261,16 @@ export class StreamService {
       return filename;
     }
 
+    const codes = languageCodes && languageCodes.length > 0 ? ` ${languageCodes.join('.')}` : '';
+
     const lastDot = filename.lastIndexOf('.');
     if (lastDot > 0 && lastDot < filename.length - 1) {
       const base = filename.slice(0, lastDot);
       const ext = filename.slice(lastDot);
-      return `${base} [${languageTag}]${ext}`;
+      return `${base}${codes} [${languageTag}]${ext}`;
     }
 
-    return `${filename} [${languageTag}]`;
+    return `${filename}${codes} [${languageTag}]`;
   }
 
   private static buildBingeGroup(stream: SourceStream, provider: DebridProvider): string | undefined {
