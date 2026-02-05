@@ -249,8 +249,10 @@ export class StreamService {
     }
 
     const lastDot = filename.lastIndexOf('.');
-    const base = lastDot > 0 && lastDot < filename.length - 1 ? filename.slice(0, lastDot) : filename;
-    const ext = lastDot > 0 && lastDot < filename.length - 1 ? filename.slice(lastDot) : '';
+    const extCandidate = lastDot > 0 ? filename.slice(lastDot + 1).toLowerCase() : '';
+    const isKnownExt = /(mkv|mp4|avi|m4v|ts|m2ts|iso|mpg|mpeg|wmv|mov|rar|zip)$/.test(extCandidate);
+    const base = lastDot > 0 && isKnownExt ? filename.slice(0, lastDot) : filename;
+    const ext = lastDot > 0 && isKnownExt ? filename.slice(lastDot) : '';
 
     const upperBase = base.toUpperCase();
     const missing = codes.filter((code) => !new RegExp(`\\b${code}\\b`, 'i').test(upperBase));
