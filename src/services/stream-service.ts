@@ -135,14 +135,15 @@ export class StreamService {
 
     const sourceLabel = StreamService.pickIndexer(sourceStream, behaviorHints, url);
     if (sourceLabel) metadata.indexer = sourceLabel;
-    if (!metadata.releaseGroup && sourceLabel) {
-      metadata.releaseGroup = sourceLabel;
-    }
 
     if (sourceStream.size != undefined) metadata.size = sourceStream.size;
     if (sourceStream.seeders != undefined) metadata.seeders = sourceStream.seeders;
     if (sourceStream.quality) metadata.quality = sourceStream.quality;
     if (sourceStream.releaseGroup) metadata.releaseGroup = sourceStream.releaseGroup;
+    if (!metadata.releaseGroup) {
+      const extractedGroup = StreamService.pickReleaseGroup(finalFilename || displayFileName || sourceStream.title);
+      if (extractedGroup) metadata.releaseGroup = extractedGroup;
+    }
 
     return metadata;
   }
@@ -298,16 +299,32 @@ export class StreamService {
     return name;
   }
 
+  private static pickReleaseGroup(value?: string): string | undefined {
+    if (!value) return undefined;
+    const basename = value
+      .replace(/[/\\]+/g, '/')
+      .split('/')
+      .pop() ?? value;
+    const noExt = basename.replace(/\.[a-z0-9]{2,4}$/i, '');
+    const parts = noExt.split('-');
+    if (parts.length < 2) return undefined;
+    const candidate = parts[parts.length - 1]?.trim();
+    if (candidate && /^[A-Za-z0-9]{2,15}$/.test(candidate)) {
+      return candidate;
+    }
+    return undefined;
+  }
+
   private static pickIndexer(
     stream: SourceStream,
-    behaviorHints: StremioStreamBehaviorHints,
+    behaviorHints: StremioStreamBehaviorHints | undefined,
     url: string
   ): string | undefined {
     if (stream.source && stream.source.trim()) {
       return stream.source.trim();
     }
 
-    if (behaviorHints.bingeGroup) {
+    if (behaviorHints?.bingeGroup) {
       const parts = behaviorHints.bingeGroup.split('|');
       if (parts[0]) return parts[0];
     }
