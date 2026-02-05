@@ -62,7 +62,7 @@ export class StreamService {
     const displayFileName = StreamService.pickDisplayFileName(sourceStream);
     const fallbackTitle = displayFileName || sourceStream.title || 'Unknown file';
     const displayTitle = displayFileName || sourceStream.title || fallbackTitle;
-    const normalizedLanguages = StreamService.normalizeLanguages(sourceStream.languages);
+    const normalizedLanguages = StreamService.detectLanguages(sourceStream);
     const debridProvider = options?.debridProvider ?? 'realdebrid';
     const rdReady = options?.realDebridReady ?? sourceStream.cached ?? false;
     const tbReady = options?.torboxReady ?? sourceStream.cached ?? false;
@@ -94,9 +94,6 @@ export class StreamService {
     const behaviorHints: StremioStreamBehaviorHints = {};
     const shouldForceNotWebReady = options?.forceNotWebReady ?? true;
     const hintFileName = displayFileName || sourceStream.fileName;
-    if (hintFileName) {
-      behaviorHints.filename = StreamService.appendLanguageToFilename(hintFileName, normalizedLanguages);
-    }
     if (sourceStream.size != undefined) {
       behaviorHints.videoSize = sourceStream.size;
     }
@@ -120,29 +117,20 @@ export class StreamService {
       metadata.behaviorHints = behaviorHints;
     }
 
-    // Add optional properties only if they exist
-    if (sourceStream.infoHash) {
-      const normalizedHash = sourceStream.infoHash.trim().toLowerCase();
-      if (normalizedHash) {
-        metadata.infoHash = normalizedHash;
-      }
-    }
-    const finalFilename = behaviorHints.filename || hintFileName;
-    if (finalFilename) {
-      metadata.filename = finalFilename;
-      metadata.folderName = StreamService.pickFolderName(finalFilename);
-    }
-
     const sourceLabelMeta = StreamService.pickIndexer(sourceStream, behaviorHints, url);
     if (sourceLabelMeta) metadata.indexer = sourceLabelMeta;
 
-    if (sourceStream.size != undefined) metadata.size = sourceStream.size;
-    if (sourceStream.seeders != undefined) metadata.seeders = sourceStream.seeders;
-    if (sourceStream.quality) metadata.quality = sourceStream.quality;
-    if (sourceStream.releaseGroup) metadata.releaseGroup = sourceStream.releaseGroup;
-    if (!metadata.releaseGroup) {
-      const extractedGroup = StreamService.pickReleaseGroup(finalFilename || displayFileName || sourceStream.title);
-      if (extractedGroup) metadata.releaseGroup = extractedGroup;
+    let decoratedFilename = hintFileName
+      ? StreamService.appendLanguageToFilename(hintFileName, normalizedLanguages)
+      : undefined;
+    if (decoratedFilename) {
+      decoratedFilename = StreamService.appendGroupToFilename(decoratedFilename, sourceLabelMeta);
+      behaviorHints.filename = decoratedFilename;
+      metadata.filename = decoratedFilename;
+      metadata.folderName = StreamService.pickFolderName(decoratedFilename);
+    }
+    if (sourceLabelMeta) {
+      metadata.releaseGroup = StreamService.sanitizeGroup(sourceLabelMeta);
     }
 
     return metadata;
@@ -208,6 +196,48 @@ export class StreamService {
     if (['portuguese', 'brazilian', 'pt-br', 'ptbr', 'pt'].includes(key)) return 100;
     if (['english', 'eng', 'en'].includes(key)) return 90;
     return 0;
+  }
+
+  private static detectLanguages(stream: SourceStream): string[] {
+    const fromSource = Array.isArray(stream.languages) ? stream.languages : [];
+    const text = `${stream.fileName ?? ''} ${stream.title ?? ''}`.toLowerCase();
+
+    const detected: string[] = [];
+    if (/\b(pt[\s\.\-_]?br|brazilian|dublado|dublada|portuguese|portugues)\b/.test(text)) {
+      detected.push('Portuguese');
+    }
+    if (/\b(english|eng)\b/.test(text)) {
+      detected.push('English');
+    }
+    if (/\b(spanish|espanol|español|latino|castellano|spa)\b/.test(text)) {
+      detected.push('Spanish');
+    }
+    if (/\b(french|frances|fr)\b/.test(text)) {
+      detected.push('French');
+    }
+    if (/\b(italian|italiano|ita)\b/.test(text)) {
+      detected.push('Italian');
+    }
+    if (/\b(german|alemao|ger|de)\b/.test(text)) {
+      detected.push('German');
+    }
+    if (/\b(japanese|japones|jpn)\b/.test(text)) {
+      detected.push('Japanese');
+    }
+    if (/\b(korean|coreano|kor|ko)\b/.test(text)) {
+      detected.push('Korean');
+    }
+    if (/\b(chinese|chines|mandarin|chi|zh)\b/.test(text)) {
+      detected.push('Chinese');
+    }
+    if (/\b(russian|russo|rus|ru)\b/.test(text)) {
+      detected.push('Russian');
+    }
+    if (/\b(hindi|hin)\b/.test(text)) {
+      detected.push('Hindi');
+    }
+
+    return StreamService.normalizeLanguages([...fromSource, ...detected]);
   }
 
   private static buildLanguageCodes(languages: string[]): string[] {
@@ -286,6 +316,33 @@ export class StreamService {
       else if (['hindi', 'hi'].includes(k)) codes.push('HIN');
     }
     return Array.from(new Set(codes));
+  }
+
+  private static sanitizeGroup(group?: string): string | undefined {
+    if (!group) return undefined;
+    const trimmed = group.trim().replace(/^www\./i, '');
+    if (!trimmed) return undefined;
+    const base = trimmed.split('.')[0] || trimmed;
+    const cleaned = base.replace(/[^A-Za-z0-9_-]/g, '');
+    return cleaned || undefined;
+  }
+
+  private static appendGroupToFilename(filename: string, group?: string): string {
+    const cleanGroup = StreamService.sanitizeGroup(group);
+    if (!filename || !cleanGroup) return filename;
+
+    const lastDot = filename.lastIndexOf('.');
+    const extCandidate = lastDot > 0 ? filename.slice(lastDot + 1).toLowerCase() : '';
+    const isKnownExt = /(mkv|mp4|avi|m4v|ts|m2ts|iso|mpg|mpeg|wmv|mov|rar|zip)$/.test(extCandidate);
+    const base = lastDot > 0 && isKnownExt ? filename.slice(0, lastDot) : filename;
+    const ext = lastDot > 0 && isKnownExt ? filename.slice(lastDot) : '';
+
+    if (new RegExp(`-${cleanGroup}$`, 'i').test(base)) {
+      return filename;
+    }
+
+    const withGroup = `${base}-${cleanGroup}`;
+    return `${withGroup}${ext}`;
   }
 
   private static pickFolderName(filename: string): string | undefined {
