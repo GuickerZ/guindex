@@ -106,12 +106,6 @@ export class StreamController {
           });
 
           const meta = StreamService.createStreamMetadata(stream, resolveUrl, commonOptions);
-          if (selectedProvider === 'torbox') {
-            delete meta.externalUrl;
-            delete meta.seeders;
-            delete meta.quality;
-            delete meta.releaseGroup;
-          }
           return meta;
         })
         .filter((stream): stream is StremioStream => Boolean(stream));

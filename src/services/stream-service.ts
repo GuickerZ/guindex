@@ -20,7 +20,9 @@ export class StreamService {
     url: string,
     options?: StreamMetadataOptions
   ): StremioStream {
-    const fallbackTitle = sourceStream.title || 'Unknown file';
+    const displayFileName = StreamService.pickDisplayFileName(sourceStream);
+    const fallbackTitle = displayFileName || sourceStream.title || 'Unknown file';
+    const displayTitle = displayFileName || sourceStream.title || fallbackTitle;
     const debridProvider = options?.debridProvider ?? 'realdebrid';
     const rdReady = options?.realDebridReady ?? sourceStream.cached ?? false;
     const tbReady = options?.torboxReady ?? sourceStream.cached ?? false;
@@ -29,36 +31,38 @@ export class StreamService {
     const readyLabel =
       debridProvider === 'torbox'
         ? isReady
-          ? `${providerLabel}⚡`
-          : `${providerLabel}…`
+          ? `${providerLabel}+`
+          : `${providerLabel}~`
         : isReady
           ? `${providerLabel}+`
           : providerLabel;
-    const baseName = sourceStream.name || `[Brazuca Debrid] ${fallbackTitle}`;
+    const baseName = sourceStream.name || `[Brazuca Debrid] ${displayTitle}`;
 
     const displayName =
       debridProvider === 'torbox'
-        ? `[${readyLabel}] ${StreamService.buildTorboxName(sourceStream, fallbackTitle)}`
+        ? `[${readyLabel}] ${StreamService.buildTorboxName(sourceStream, displayTitle)}`
         : `[${readyLabel}] ${baseName}`;
     const metadata: StremioStream = {
       name: displayName,
-      title: fallbackTitle,
+      title: displayTitle,
       url
     };
 
     const behaviorHints: StremioStreamBehaviorHints = {};
     const shouldForceNotWebReady = options?.forceNotWebReady ?? true;
+    const hintFileName = displayFileName || sourceStream.fileName;
+    if (hintFileName) {
+      behaviorHints.filename = hintFileName;
+    }
+    if (sourceStream.size != undefined) {
+      behaviorHints.videoSize = sourceStream.size;
+    }
+
     if (debridProvider === 'torbox') {
       behaviorHints.torboxReady = isReady;
       const bingeGroup = StreamService.buildBingeGroup(sourceStream, debridProvider);
       if (bingeGroup) {
         behaviorHints.bingeGroup = bingeGroup;
-      }
-      if (sourceStream.fileName) {
-        behaviorHints.filename = sourceStream.fileName;
-      }
-      if (sourceStream.size !== undefined) {
-        behaviorHints.videoSize = sourceStream.size;
       }
     } else {
       if (shouldForceNotWebReady) {
@@ -79,7 +83,7 @@ export class StreamService {
         metadata.description = description;
       }
       if (!isReady && !metadata.description) {
-        metadata.description = 'Baixando no TorBox – aguarde alguns segundos e tente reproduzir novamente.';
+        metadata.description = 'Baixando no TorBox - aguarde alguns segundos e tente novamente.';
       }
     }
 
@@ -90,10 +94,10 @@ export class StreamService {
         metadata.infoHash = normalizedHash;
       }
     }
-    const externalUrl = StreamService.sanitizeExternalUrl(sourceStream.url);
+    const externalUrl = StreamService.sanitizeExternalUrl(sourceStream.detailUrl ?? sourceStream.url);
     if (externalUrl) metadata.externalUrl = externalUrl;
-    if (sourceStream.size !== undefined) metadata.size = sourceStream.size;
-    if (sourceStream.seeders !== undefined) metadata.seeders = sourceStream.seeders;
+    if (sourceStream.size != undefined) metadata.size = sourceStream.size;
+    if (sourceStream.seeders != undefined) metadata.seeders = sourceStream.seeders;
     if (sourceStream.quality) metadata.quality = sourceStream.quality;
     if (sourceStream.releaseGroup) metadata.releaseGroup = sourceStream.releaseGroup;
 
@@ -125,35 +129,62 @@ export class StreamService {
     return fallbackTitle;
   }
 
-  private static buildTorboxDescription(stream: SourceStream): string | undefined {
-    const fileName = stream.fileName || stream.title;
-    if (!fileName) {
+  private static pickDisplayFileName(stream: SourceStream): string | undefined {
+    const direct = stream.fileName?.trim();
+    if (direct) {
+      return direct;
+    }
+    return StreamService.pickFirstLine(stream.title);
+  }
+
+  private static pickFirstLine(value?: string): string | undefined {
+    if (!value) {
       return undefined;
     }
+    const lines = value
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+    return lines[0];
+  }
 
+  private static buildTorboxDescription(stream: SourceStream): string | undefined {
     const lines: string[] = [];
-    lines.push(`📄 ${fileName}`);
+    const fileName = StreamService.pickDisplayFileName(stream);
+    if (fileName) {
+      lines.push(`File: ${fileName}`);
+    }
 
-    const infoParts: string[] = [];
+    const titleLine = StreamService.pickFirstLine(stream.title);
+    if (titleLine && titleLine != fileName) {
+      lines.push(`Title: ${titleLine}`);
+    }
+
     if (stream.quality) {
-      infoParts.push(stream.quality);
+      lines.push(`Quality: ${stream.quality}`);
     }
     if (stream.releaseGroup) {
-      infoParts.push(stream.releaseGroup);
+      lines.push(`Group: ${stream.releaseGroup}`);
     }
-    if (infoParts.length > 0) {
-      lines.push(`★ ${infoParts.join(' • ')}`);
+    if (stream.size != undefined) {
+      lines.push(`Size: ${StreamService.formatBytes(stream.size)}`);
     }
-
-    if (stream.size !== undefined) {
-      lines.push(`💾 ${StreamService.formatBytes(stream.size)}`);
+    if (stream.seeders != undefined) {
+      lines.push(`Seeders: ${Math.max(0, Math.floor(stream.seeders))}`);
     }
-
+    if (Array.isArray(stream.languages) && stream.languages.length > 0) {
+      lines.push(`Languages: ${stream.languages.join(', ')}`);
+    }
     if (stream.source) {
-      lines.push(`🔎 ${stream.source}`);
+      lines.push(`Source: ${stream.source}`);
     }
 
-    return lines.join('\n');
+    const link = StreamService.sanitizeExternalUrl(stream.detailUrl ?? stream.url);
+    if (link) {
+      lines.push(`Link: ${link}`);
+    }
+
+    return lines.length > 0 ? lines.join('\n') : undefined;
   }
 
   private static formatBytes(bytes: number): string {
@@ -181,12 +212,28 @@ export class StreamService {
       return undefined;
     }
 
-    if (!/^https:\/\//i.test(trimmed)) {
+    if (!/^https?:\/\//i.test(trimmed)) {
       return undefined;
     }
 
     try {
       const parsed = new URL(trimmed);
+      const path = parsed.pathname.toLowerCase();
+      if (path.includes('/resolve') || path.includes('/playback')) {
+        return undefined;
+      }
+      if (parsed.searchParams.has('magnet') || parsed.searchParams.has('linkType')) {
+        return undefined;
+      }
+
+      for (const key of [...parsed.searchParams.keys()]) {
+        if (/token|apikey|api_key|rdtoken|tbtoken|torbox|realdebrid|debrid/i.test(key)) {
+          parsed.searchParams.delete(key);
+        }
+      }
+
+      parsed.username = '';
+      parsed.password = '';
       parsed.protocol = 'https:';
       return parsed.toString();
     } catch {

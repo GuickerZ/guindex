@@ -7,7 +7,7 @@ export interface StreamContext {
   episode?: number;
   episodeTitle?: string;
   title?: string;
- year?: number;
+  year?: number;
   episodeList?: number[];
 }
 export interface SourceStream {
@@ -15,6 +15,8 @@ export interface SourceStream {
   name?: string;
   title?: string;
   fileName?: string;
+  detailUrl?: string;
+  languages?: string[];
   source?: string;
   url?: string;
   magnet?: string;

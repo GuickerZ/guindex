@@ -920,6 +920,7 @@ private mapTorrentToStream(
   infoSegments.push(`⚙️ [${sourceLabel}]`);
 
   const audioLine = this.formatAudioLine(torrent);
+  const languages = this.extractAudioLanguages(torrent);
 
   const headline = quality ? `${displayTitle} [${quality}]` : displayTitle;
   const titleLines = [headline]; // **removido**: [RD] padrão
@@ -948,6 +949,14 @@ private mapTorrentToStream(
     magnet,
     cached: false
   };
+
+  if (detailUrl) {
+    stream.detailUrl = detailUrl;
+  }
+
+  if (languages.length > 0) {
+    stream.languages = languages;
+  }
 
   const infoHash =
     (torrent as Record<string, unknown>).infoHash ||
