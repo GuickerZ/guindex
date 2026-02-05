@@ -117,6 +117,88 @@ const LANGUAGE_FLAG_MAP: Record<string, string> = {
   latim: '🇻🇦',
 };
 
+const LANGUAGE_ALIASES: Record<string, string> = {
+  portuguese: 'Portuguese',
+  portugues: 'Portuguese',
+  'pt-br': 'Portuguese',
+  'pt br': 'Portuguese',
+  ptbr: 'Portuguese',
+  brazilian: 'Portuguese',
+  'brazilian portuguese': 'Portuguese',
+  dublado: 'Portuguese',
+  dublada: 'Portuguese',
+  english: 'English',
+  ingles: 'English',
+  eng: 'English',
+  spanish: 'Spanish',
+  espanhol: 'Spanish',
+  espanol: 'Spanish',
+  castellano: 'Spanish',
+  latino: 'Spanish',
+  french: 'French',
+  frances: 'French',
+  italian: 'Italian',
+  italiano: 'Italian',
+  german: 'German',
+  alemao: 'German',
+  japanese: 'Japanese',
+  japones: 'Japanese',
+  korean: 'Korean',
+  coreano: 'Korean',
+  chinese: 'Chinese',
+  chines: 'Chinese',
+  mandarim: 'Chinese',
+  mandarin: 'Chinese',
+  cantonese: 'Cantonese',
+  cantones: 'Cantonese',
+  russian: 'Russian',
+  russo: 'Russian',
+  hindi: 'Hindi',
+  arabic: 'Arabic',
+  arabe: 'Arabic',
+  turkish: 'Turkish',
+  turco: 'Turkish',
+  polish: 'Polish',
+  polones: 'Polish',
+  swedish: 'Swedish',
+  sueco: 'Swedish',
+  norwegian: 'Norwegian',
+  noruegues: 'Norwegian',
+  danish: 'Danish',
+  dinamarques: 'Danish',
+  finnish: 'Finnish',
+  finlandes: 'Finnish',
+  czech: 'Czech',
+  tcheco: 'Czech',
+  hungarian: 'Hungarian',
+  hungaro: 'Hungarian',
+  ukrainian: 'Ukrainian',
+  ucraniano: 'Ukrainian',
+  thai: 'Thai',
+  tailandes: 'Thai',
+  vietnamese: 'Vietnamese',
+  vietnamita: 'Vietnamese',
+  dutch: 'Dutch',
+  holandes: 'Dutch',
+  greek: 'Greek',
+  grego: 'Greek',
+  hebrew: 'Hebrew',
+  hebraico: 'Hebrew',
+  romanian: 'Romanian',
+  romeno: 'Romanian',
+  bulgarian: 'Bulgarian',
+  bulgaro: 'Bulgarian',
+  croatian: 'Croatian',
+  croata: 'Croatian',
+  icelandic: 'Icelandic',
+  islandes: 'Icelandic',
+  persian: 'Persian',
+  persa: 'Persian',
+  farsi: 'Persian',
+  latin: 'Latin',
+  latim: 'Latin',
+};
+
 interface MatchContext {
   parsed: ParsedIdInfo;
   type: string;
@@ -1090,6 +1172,25 @@ private mapTorrentToStream(
   private extractAudioLanguages(torrent: TorrentLike): string[] {
     const record = torrent as Record<string, unknown>;
     const languages = new Set<string>();
+    let sawDualAudio = false;
+
+    const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    const addFromText = (text: string) => {
+      const normalized = this.normalizeLanguageKey(text);
+      const tokenized = normalized.replace(/[^a-z0-9]+/g, ' ').trim();
+
+      if (/\bdual\s*audio\b|\bmulti\s*audio\b/.test(tokenized)) {
+        sawDualAudio = true;
+      }
+
+      for (const [alias, canonical] of Object.entries(LANGUAGE_ALIASES)) {
+        const pattern = new RegExp(`\\b${escapeRegex(alias)}\\b`, 'i');
+        if (pattern.test(normalized) || pattern.test(tokenized)) {
+          languages.add(canonical);
+        }
+      }
+    };
 
     const addLanguage = (value: unknown) => {
       if (!value) {
@@ -1102,24 +1203,7 @@ private mapTorrentToStream(
       }
 
       if (typeof value === 'string') {
-        const normalizedValue = value.replace(/\s*(?:e|and|\+|&)\s*/gi, ',');
-        const segments = normalizedValue.split(/[,/;|]/);
-        segments.forEach((segment) => {
-          const trimmed = segment.trim();
-          if (!trimmed) {
-            return;
-          }
-
-          const normalized = trimmed.toLowerCase();
-          if (/dual audio|multi audio|dublado/.test(normalized)) {
-            return;
-          }
-
-          const titleized = this.titleize(trimmed);
-          if (titleized) {
-            languages.add(titleized);
-          }
-        });
+        addFromText(value);
       }
     };
 
@@ -1132,6 +1216,40 @@ private mapTorrentToStream(
     addLanguage(record.languages);
     addLanguage(record.language);
     addLanguage(record.lang);
+    addLanguage(record.title);
+    addLanguage(record.original_title);
+    addLanguage(record.name);
+    addLanguage(record.filename);
+    addLanguage(record.release);
+    addLanguage(record.file);
+    addLanguage(record.displayName);
+    addLanguage(record.description);
+    addLanguage(record.summary);
+    addLanguage(record.plot);
+    addLanguage(record.synopsis);
+    addLanguage(record.details);
+    addLanguage(record.slug);
+    addLanguage(record.category);
+    addLanguage(record.subcategory);
+
+    const tags = record.tags ?? record.categories;
+    if (Array.isArray(tags)) {
+      tags.forEach(addLanguage);
+    }
+
+    if (sawDualAudio) {
+      if (languages.size === 0) {
+        languages.add('Portuguese');
+        languages.add('English');
+      } else {
+        if (languages.has('English') && !languages.has('Portuguese')) {
+          languages.add('Portuguese');
+        }
+        if (languages.has('Portuguese') && !languages.has('English')) {
+          languages.add('English');
+        }
+      }
+    }
 
     return Array.from(languages);
   }
