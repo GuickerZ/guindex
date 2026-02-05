@@ -102,7 +102,7 @@ export class StreamService {
     const shouldForceNotWebReady = options?.forceNotWebReady ?? true;
     const hintFileName = displayFileName || sourceStream.fileName;
     if (hintFileName) {
-      behaviorHints.filename = hintFileName;
+      behaviorHints.filename = StreamService.appendLanguageToFilename(hintFileName, languageTag);
     }
     if (sourceStream.size != undefined) {
       behaviorHints.videoSize = sourceStream.size;
@@ -218,6 +218,26 @@ export class StreamService {
     if (['portuguese', 'brazilian', 'pt-br', 'ptbr', 'pt'].includes(key)) return 100;
     if (['english', 'eng', 'en'].includes(key)) return 90;
     return 0;
+  }
+
+  private static appendLanguageToFilename(filename: string, languageTag?: string): string {
+    if (!filename || !languageTag) {
+      return filename;
+    }
+
+    // avoid duplicating tag
+    if (filename.includes(`[${languageTag}]`)) {
+      return filename;
+    }
+
+    const lastDot = filename.lastIndexOf('.');
+    if (lastDot > 0 && lastDot < filename.length - 1) {
+      const base = filename.slice(0, lastDot);
+      const ext = filename.slice(lastDot);
+      return `${base} [${languageTag}]${ext}`;
+    }
+
+    return `${filename} [${languageTag}]`;
   }
 
   private static buildBingeGroup(stream: SourceStream, provider: DebridProvider): string | undefined {
