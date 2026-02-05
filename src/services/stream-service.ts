@@ -78,18 +78,13 @@ export class StreamService {
           : providerLabel;
     const baseName = sourceStream.name || `[Brazuca Debrid] ${displayTitle}`;
 
-    const sourceLabel = StreamService.pickIndexer(sourceStream, undefined, url);
-
-    let displayName =
+    const displayName =
       debridProvider === 'torbox'
         ? `[${readyLabel}] ${StreamService.buildTorboxName(sourceStream, displayTitle)}`
         : `[${readyLabel}] ${baseName}`;
-    if (sourceLabel) {
-      displayName = `${displayName} • ${sourceLabel}`;
-    }
     const metadata: StremioStream = {
       name: displayName,
-      title: sourceLabel ? `${displayTitle} • ${sourceLabel}` : displayTitle,
+      title: displayTitle,
       url
     };
     if (normalizedLanguages.length > 0) {
