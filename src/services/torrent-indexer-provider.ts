@@ -1237,20 +1237,6 @@ private mapTorrentToStream(
       tags.forEach(addLanguage);
     }
 
-    if (sawDualAudio) {
-      if (languages.size === 0) {
-        languages.add('Portuguese');
-        languages.add('English');
-      } else {
-        if (languages.has('English') && !languages.has('Portuguese')) {
-          languages.add('Portuguese');
-        }
-        if (languages.has('Portuguese') && !languages.has('English')) {
-          languages.add('English');
-        }
-      }
-    }
-
     return Array.from(languages);
   }
 

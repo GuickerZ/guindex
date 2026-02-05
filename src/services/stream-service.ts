@@ -139,9 +139,19 @@ export class StreamService {
         metadata.infoHash = normalizedHash;
       }
     }
+    const finalFilename = behaviorHints.filename || hintFileName;
+    if (finalFilename) {
+      metadata.filename = finalFilename;
+      metadata.folderName = StreamService.pickFolderName(finalFilename);
+    }
+
+    const sourceLabel = StreamService.buildSourceLabel(sourceStream.source);
+    if (sourceLabel) metadata.indexer = sourceLabel;
+
     if (sourceStream.size != undefined) metadata.size = sourceStream.size;
     if (sourceStream.seeders != undefined) metadata.seeders = sourceStream.seeders;
     if (sourceStream.quality) metadata.quality = sourceStream.quality;
+    if (sourceStream.releaseGroup) metadata.releaseGroup = sourceStream.releaseGroup;
 
     return metadata;
   }
@@ -213,8 +223,9 @@ export class StreamService {
   }
 
   private static buildSourceLabel(source?: string): string | undefined {
-    // no longer used (kept for potential future need)
-    return source?.trim() || undefined;
+    if (!source) return undefined;
+    const cleaned = source.trim();
+    return cleaned || undefined;
   }
 
   private static buildLanguageCodes(languages: string[]): string[] {
@@ -269,6 +280,17 @@ export class StreamService {
     }
 
     return `${filename}${codes} [${languageTag}]`;
+  }
+
+  private static pickFolderName(filename: string): string | undefined {
+    if (!filename) return undefined;
+    const lastSlash = Math.max(filename.lastIndexOf('/'), filename.lastIndexOf('\\'));
+    const name = lastSlash >= 0 ? filename.slice(lastSlash + 1) : filename;
+    const lastDot = name.lastIndexOf('.');
+    if (lastDot > 0) {
+      return name.slice(0, lastDot);
+    }
+    return name;
   }
 
   private static buildBingeGroup(stream: SourceStream, provider: DebridProvider): string | undefined {

@@ -25,6 +25,9 @@ export interface StremioStream {
   quality?: string;
   releaseGroup?: string;
   languages?: string[];
+  filename?: string;
+  folderName?: string;
+  indexer?: string;
 }
 
 export interface StreamResponse {
