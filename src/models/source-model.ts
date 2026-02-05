@@ -14,6 +14,7 @@ export interface SourceStream {
   cached?: boolean;
   name?: string;
   title?: string;
+  description?: string;
   fileName?: string;
   detailUrl?: string;
   languages?: string[];

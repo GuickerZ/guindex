@@ -445,7 +445,7 @@ function pickInfoHash(
   if (bingeGroup) {
     const parts = bingeGroup.split('|').map((part) => part.trim());
     const last = parts[parts.length - 1];
-    if (/^[a-f0-9]{40}$/i.test(last)) {
+    if (last && /^[a-f0-9]{40}$/i.test(last)) {
       return last.toLowerCase();
     }
   }

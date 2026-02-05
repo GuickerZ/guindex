@@ -177,7 +177,7 @@ export class TorboxClient {
       headersTimeout: this.requestTimeout,
       bodyTimeout: this.requestTimeout
     });
-    const location = res.headers['location'];
+    const locationHeader = res.headers['location'];
     const text = await res.body.text();
     const bodyPreview = (text ?? '').slice(0, 200);
 
@@ -200,6 +200,7 @@ export class TorboxClient {
       }
     }
 
+    const location = Array.isArray(locationHeader) ? locationHeader[0] : locationHeader;
     const linkCandidate = parsedLink || location || text?.trim();
     console.debug('[TorBox] requestDownloadLink raw', {
       status: res.statusCode,
@@ -247,7 +248,7 @@ export class TorboxClient {
       bodyTimeout: this.requestTimeout,
       maxRedirections: 2
     });
-    const location = res.headers['location'];
+    const locationHeader = res.headers['location'];
     const text = await res.body.text();
     const bodyPreview = (text ?? '').slice(0, 200);
 
@@ -270,6 +271,7 @@ export class TorboxClient {
       }
     }
 
+    const location = Array.isArray(locationHeader) ? locationHeader[0] : locationHeader;
     const linkCandidate = parsedLink || location || text?.trim();
     console.debug('[TorBox] requestWebDlLink raw', {
       status: res.statusCode,
