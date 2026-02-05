@@ -245,46 +245,55 @@ export class StreamService {
       return filename;
     }
 
-    const tokens = StreamService.languageTokens(languages);
-    if (tokens.length === 0) {
+    const codes = StreamService.languageCodeTokens(languages); // ex: PTBR, ENG
+    if (codes.length === 0) {
       return filename;
     }
 
-    const suffix = ` (${tokens.join(', ')})`;
-
-    // avoid duplicate if already contains the exact suffix
-    if (filename.toLowerCase().includes(suffix.toLowerCase())) {
-      return filename;
+    // add DUAL marker when more than one language
+    if (codes.length > 1 && !codes.includes('DUAL')) {
+      codes.push('DUAL');
     }
 
     const lastDot = filename.lastIndexOf('.');
-    if (lastDot > 0 && lastDot < filename.length - 1) {
-      const base = filename.slice(0, lastDot);
-      const ext = filename.slice(lastDot);
-      return `${base}${suffix}${ext}`;
+    const base = lastDot > 0 && lastDot < filename.length - 1 ? filename.slice(0, lastDot) : filename;
+    const ext = lastDot > 0 && lastDot < filename.length - 1 ? filename.slice(lastDot) : '';
+
+    const upperBase = base.toUpperCase();
+    const toAppend: string[] = [];
+    for (const code of codes) {
+      const needle = `.${code.toUpperCase()}`;
+      if (!upperBase.includes(needle)) {
+        toAppend.push(code);
+      }
     }
 
-    return `${filename}${suffix}`;
+    if (toAppend.length === 0) {
+      return filename;
+    }
+
+    const newBase = `${base}.${toAppend.join('.')}`;
+    return `${newBase}${ext}`;
   }
 
-  private static languageTokens(languages: string[]): string[] {
+  private static languageCodeTokens(languages: string[]): string[] {
     const norm = (v: string) => StreamService.normalizeLanguageKey(v);
-    const tokens: string[] = [];
+    const codes: string[] = [];
     for (const lang of languages) {
       const k = norm(lang);
-      if (['portuguese', 'brazilian', 'pt-br', 'ptbr', 'pt', 'dublado', 'dublada'].includes(k)) tokens.push('brazilian');
-      else if (['english', 'eng', 'en'].includes(k)) tokens.push('eng');
-      else if (['spanish', 'espanol', 'español', 'es', 'latino', 'castellano'].includes(k)) tokens.push('spa');
-      else if (['french', 'frances', 'fr'].includes(k)) tokens.push('fre');
-      else if (['italian', 'italiano', 'it'].includes(k)) tokens.push('ita');
-      else if (['german', 'alemao', 'de'].includes(k)) tokens.push('ger');
-      else if (['japanese', 'japones', 'jp'].includes(k)) tokens.push('jpn');
-      else if (['korean', 'coreano', 'kr', 'ko'].includes(k)) tokens.push('kor');
-      else if (['chinese', 'chines', 'zh', 'mandarin'].includes(k)) tokens.push('chi');
-      else if (['russian', 'russo', 'ru'].includes(k)) tokens.push('rus');
-      else if (['hindi', 'hi'].includes(k)) tokens.push('hin');
+      if (['portuguese', 'brazilian', 'pt-br', 'ptbr', 'pt', 'dublado', 'dublada'].includes(k)) codes.push('PTBR');
+      else if (['english', 'eng', 'en'].includes(k)) codes.push('ENG');
+      else if (['spanish', 'espanol', 'español', 'es', 'latino', 'castellano'].includes(k)) codes.push('SPA');
+      else if (['french', 'frances', 'fr'].includes(k)) codes.push('FRE');
+      else if (['italian', 'italiano', 'it'].includes(k)) codes.push('ITA');
+      else if (['german', 'alemao', 'de'].includes(k)) codes.push('GER');
+      else if (['japanese', 'japones', 'jp'].includes(k)) codes.push('JPN');
+      else if (['korean', 'coreano', 'kr', 'ko'].includes(k)) codes.push('KOR');
+      else if (['chinese', 'chines', 'zh', 'mandarin'].includes(k)) codes.push('CHI');
+      else if (['russian', 'russo', 'ru'].includes(k)) codes.push('RUS');
+      else if (['hindi', 'hi'].includes(k)) codes.push('HIN');
     }
-    return Array.from(new Set(tokens));
+    return Array.from(new Set(codes));
   }
 
   private static pickFolderName(filename: string): string | undefined {
