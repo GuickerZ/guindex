@@ -44,6 +44,7 @@ type TorrentLike = Record<string, unknown>;
 interface IndexedTorrentFile {
   path: string;
   size?: number;
+  originalIndex: number;
 }
 
 const MAX_STREAMS = 60;
@@ -997,8 +998,7 @@ private mapTorrentToStream(
     return undefined;
   }
 
-  const baseTitle = this.extractTitle(torrent) || fallbackTitle || `${this.name} Torrent`;
-  const displayTitle = this.buildDisplayTitle(torrent, baseTitle);
+  const rawTitle = this.extractTitle(torrent) || fallbackTitle || `${this.name} Torrent`;
   const detailUrl = this.extractDetailUrl(torrent);
 
   const sourceLabel =
@@ -1008,13 +1008,28 @@ private mapTorrentToStream(
 
   const selectedFile = this.selectBestTorrentFile(torrent, context);
   const selectedFileName = selectedFile?.path;
+  const fileIdx = selectedFile?.originalIndex;
 
-  const size = selectedFile?.size ?? this.extractSize(torrent);
+  // Use the selected video file's basename as the display title when available.
+  // This avoids showing slug/site junk from the indexer.
+  let displayTitle: string;
+  if (selectedFileName) {
+    const basename = selectedFileName.replace(/^.*[\\/]/, '');
+    displayTitle = this.cleanIndexerTitle(basename);
+  } else {
+    displayTitle = this.cleanIndexerTitle(this.buildDisplayTitle(torrent, rawTitle));
+  }
+
+  // Parse size — the indexer may return a string like "4.06 GB"
+  const rawSize = selectedFile?.size ?? this.extractSize(torrent);
+  const size = typeof rawSize === 'number' ? rawSize : this.parseSizeString(rawSize);
+
   const releaseYear = this.extractYear(torrent);
   const rawQuality =
     (torrent as Record<string, unknown>).quality ||
     (torrent as Record<string, unknown>).resolution ||
-    this.inferQualityFromTitle(baseTitle);
+    this.inferQualityFromTitle(displayTitle) ||
+    this.inferQualityFromTitle(rawTitle);
   const quality = this.normalizeQuality(rawQuality);
   const releaseGroup =
     (torrent as Record<string, unknown>).releaseGroup ||
@@ -1056,7 +1071,7 @@ private mapTorrentToStream(
   const stream: SourceStream = {
     name: nameLines.join('\n'),
     title: titleLines.join('\n'),
-    fileName: selectedFileName || this.extractFileName(torrent) || displayTitle,
+    fileName: selectedFileName || displayTitle || this.extractFileName(torrent),
     source: sourceLabel,
     magnet,
     cached: false
@@ -1072,12 +1087,18 @@ private mapTorrentToStream(
 
   const infoHash =
     (torrent as Record<string, unknown>).infoHash ||
+    (torrent as Record<string, unknown>).info_hash ||
     (torrent as Record<string, unknown>).hash ||
     (torrent as Record<string, unknown>).btih ||
     this.extractInfoHash(magnet);
 
   if (typeof infoHash === 'string' && infoHash) {
     stream.infoHash = infoHash.trim().toLowerCase();
+  }
+
+  // fileIdx is essential for season packs so AIOStreams knows which file to play
+  if (fileIdx !== undefined && fileIdx >= 0) {
+    stream.fileIdx = fileIdx;
   }
 
   if (size !== undefined) {
@@ -1353,7 +1374,8 @@ private mapTorrentToStream(
     }
 
     const files: IndexedTorrentFile[] = [];
-    for (const entry of filesRaw) {
+    for (let i = 0; i < filesRaw.length; i++) {
+      const entry = filesRaw[i];
       if (!entry || typeof entry !== 'object') continue;
       const record = entry as Record<string, unknown>;
       const pathCandidate = this.toString(record.path) || this.toString(record.name) || this.toString(record.file);
@@ -1361,7 +1383,7 @@ private mapTorrentToStream(
 
       const sizeRaw = record.size ?? record.sizeBytes ?? record.size_bytes ?? record.bytes;
       const size = this.toBytes(sizeRaw);
-      files.push({ path: pathCandidate.trim(), size });
+      files.push({ path: pathCandidate.trim(), size, originalIndex: i });
     }
 
     return files;
@@ -1599,6 +1621,76 @@ private mapTorrentToStream(
   private extractInfoHash(magnet: string): string | undefined {
     const match = magnet.match(/btih:([^&]+)/i);
     return match?.[1];
+  }
+
+  /**
+   * Clean dirty titles from Brazilian indexer sites.
+   * Removes site slug prefixes, double dots, duplicate extensions, etc.
+   */
+  private cleanIndexerTitle(title: string): string {
+    let cleaned = title;
+
+    // Remove known site prefixes that get concatenated into titles
+    cleaned = cleaned.replace(/^(SITEDETORRENTS\.COM\.?|WWW\.BLUDV\.(COM|TV|IN)\.?|BLUDV\.(COM|TV|IN)\.?|WWW\.THEPIRATEFILMES\.COM\.?|THEPIRATEFILMES\.COM\.?|YTSBR\.COM\.?)/gi, '');
+
+    // Remove leading dots/dashes/underscores/spaces
+    cleaned = cleaned.replace(/^[.\-_\s]+/, '');
+
+    // Brazilian indexer slug pattern: metadata-prefix separated by ".." from the actual title
+    // e.g. "BLURAY-1080P-5.1-VERSAO-ESTENDIDA-MP4.MP4.-LEGENDADO-..The.Lord.of.the.Rings..."
+    const doubleDotIdx = cleaned.indexOf('..');
+    if (doubleDotIdx > 0) {
+      const afterDoubleDot = cleaned.slice(doubleDotIdx).replace(/^\.+/, '');
+      // Only use the part after ".." if it looks like a real title (starts with a letter)
+      if (afterDoubleDot && /^[A-Za-z]/.test(afterDoubleDot)) {
+        cleaned = afterDoubleDot;
+      }
+    }
+
+    // Remove duplicate extensions like .MKV.MKV., .MP4.MP4.
+    cleaned = cleaned.replace(/\.(MKV|MP4|AVI|M4V|TS)\.\1\./gi, '.$1.');
+
+    // Remove trailing file extension for display
+    cleaned = cleaned.replace(/\.(mkv|mp4|avi|m4v|ts|m2ts|iso)$/i, '');
+
+    // Remove orphaned parenthetical language tags from the indexer e.g. "(eng)", "(brazilian, eng)"
+    cleaned = cleaned.replace(/\s*\((brazilian|eng|portuguese|portugues|english|spanish|espanhol|dublado|legendado)(?:\s*,\s*(brazilian|eng|portuguese|portugues|english|spanish|espanhol|dublado|legendado))*\)\s*$/i, '');
+
+    // Clean up ugly slug patterns: .-LEGENDADO-., .-DUBLADO-.
+    cleaned = cleaned.replace(/\.-([A-Z]+)-\./g, ' $1 ');
+
+    // Collapse multiple dots/spaces
+    cleaned = cleaned.replace(/\.{2,}/g, '.').replace(/\s{2,}/g, ' ').trim();
+
+    // Remove leading dots/dashes/underscores after all cleaning
+    cleaned = cleaned.replace(/^[.\-_\s]+/, '');
+
+    return cleaned || title;
+  }
+
+  /**
+   * Parse size strings like "4.06 GB", "19.72 GB", "711 MB" into bytes.
+   */
+  private parseSizeString(value: unknown): number | undefined {
+    if (typeof value === 'number') return value;
+    if (typeof value !== 'string') return undefined;
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+
+    const match = trimmed.match(/([\d.]+)\s*(TB|GB|MB|KB|B)/i);
+    if (!match || !match[1] || !match[2]) return undefined;
+
+    const num = parseFloat(match[1]);
+    if (isNaN(num)) return undefined;
+
+    const unit = match[2].toUpperCase();
+    switch (unit) {
+      case 'TB': return Math.round(num * 1024 * 1024 * 1024 * 1024);
+      case 'GB': return Math.round(num * 1024 * 1024 * 1024);
+      case 'MB': return Math.round(num * 1024 * 1024);
+      case 'KB': return Math.round(num * 1024);
+      default: return Math.round(num);
+    }
   }
 
   private extractSeeders(torrent: TorrentLike): number | undefined {

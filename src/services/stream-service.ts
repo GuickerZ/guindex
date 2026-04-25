@@ -160,6 +160,9 @@ export class StreamService {
     if (sourceStream.seeders != undefined) {
       metadata.seeders = sourceStream.seeders;
     }
+    if (sourceStream.fileIdx != undefined && sourceStream.fileIdx >= 0) {
+      metadata.fileIdx = sourceStream.fileIdx;
+    }
     if (sourceStream.quality) {
       metadata.quality = sourceStream.quality;
     }
@@ -279,6 +282,14 @@ export class StreamService {
 
   private static detectLanguages(stream: SourceStream): string[] {
     const fromSource = Array.isArray(stream.languages) ? stream.languages : [];
+
+    // If the source provider (e.g. torrent-indexer) already returned languages,
+    // use those as the primary source and don't re-detect from text to avoid duplication.
+    if (fromSource.length > 0) {
+      return StreamService.normalizeLanguages(fromSource);
+    }
+
+    // Only detect from text when no languages were provided by the source
     const text = `${stream.fileName ?? ''} ${stream.title ?? ''}`.toLowerCase();
     const normalizedText = StreamService.normalizeLanguageKey(text);
 
@@ -334,7 +345,7 @@ export class StreamService {
       detected.push('English');
     }
 
-    return StreamService.normalizeLanguages([...fromSource, ...detected]);
+    return StreamService.normalizeLanguages(detected);
   }
 
   private static buildLanguageCodes(languages: string[]): string[] {

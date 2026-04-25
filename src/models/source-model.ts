@@ -22,6 +22,7 @@ export interface SourceStream {
   url?: string;
   magnet?: string;
   infoHash?: string;
+  fileIdx?: number;
   size?: number;
   seeders?: number;
   quality?: string;

@@ -19,6 +19,7 @@ export interface StremioStream {
   url: string;
   behaviorHints?: StremioStreamBehaviorHints;
   infoHash?: string;
+  fileIdx?: number;
   externalUrl?: string;
   size?: number;
   seeders?: number;
