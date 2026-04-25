@@ -182,16 +182,19 @@ export class StreamService {
       if (!isReady) {
         behaviorHints.notWebReady = true;
       }
-      const bingeGroup = StreamService.buildBingeGroup(sourceStream, debridProvider);
-      if (bingeGroup) {
-        behaviorHints.bingeGroup = bingeGroup;
-      }
     } else {
       if (shouldForceNotWebReady) {
         behaviorHints.notWebReady = true;
       }
       behaviorHints.realDebridReady = isReady;
     }
+
+    // bingeGroup must be set for ALL providers so Stremio "next episode" works
+    const bingeGroup = StreamService.buildBingeGroup(sourceStream, debridProvider);
+    if (bingeGroup) {
+      behaviorHints.bingeGroup = bingeGroup;
+    }
+
     if (options?.fallbackMagnet && debridProvider !== 'torbox') {
       behaviorHints.fallbackMagnet = options.fallbackMagnet;
     }
@@ -202,9 +205,7 @@ export class StreamService {
     const sourceLabelMeta = StreamService.pickIndexer(sourceStream, behaviorHints, url);
     if (sourceLabelMeta) metadata.indexer = sourceLabelMeta;
 
-    let decoratedFilename = hintFileName
-      ? StreamService.appendLanguageToFilename(hintFileName, normalizedLanguages)
-      : undefined;
+    let decoratedFilename = hintFileName ?? undefined;
     if (decoratedFilename) {
       decoratedFilename = StreamService.appendGroupToFilename(decoratedFilename, sourceLabelMeta);
       behaviorHints.filename = decoratedFilename;

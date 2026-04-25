@@ -594,22 +594,24 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     const normalizedType = type.toLowerCase();
     const imdb = this.extractImdb(torrent);
 
-    if (parsed.imdbId && imdb) {
-      return imdb.toLowerCase() === parsed.imdbId.toLowerCase();
-    }
+    // Title-based check: only for non-IMDB searches
+    if (!parsed.imdbId || !imdb) {
+      const torrentTitles = this.collectTorrentTitles(torrent);
+      if (targetTitles.length > 0 && torrentTitles.length > 0) {
+        const normalizedTargets = targetTitles.map((title) => this.normalizeForComparison(title));
+        const normalizedTorrentTitles = torrentTitles.map((title) => this.normalizeForComparison(title));
 
-    const torrentTitles = this.collectTorrentTitles(torrent);
-    if (targetTitles.length > 0 && torrentTitles.length > 0) {
-      const normalizedTargets = targetTitles.map((title) => this.normalizeForComparison(title));
-      const normalizedTorrentTitles = torrentTitles.map((title) => this.normalizeForComparison(title));
+        const matchesTitle = normalizedTorrentTitles.some((torrentTitle) =>
+          normalizedTargets.some((targetTitle) => torrentTitle.includes(targetTitle) || targetTitle.includes(torrentTitle)),
+        );
 
-      const matchesTitle = normalizedTorrentTitles.some((torrentTitle) =>
-        normalizedTargets.some((targetTitle) => torrentTitle.includes(targetTitle) || targetTitle.includes(torrentTitle)),
-      );
-
-      if (!matchesTitle) {
-        return false;
+        if (!matchesTitle) {
+          return false;
+        }
       }
+    } else if (imdb.toLowerCase() !== parsed.imdbId.toLowerCase()) {
+      // IMDB mismatch
+      return false;
     }
 
     if (normalizedType === 'movie') {
@@ -625,14 +627,17 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       }
     }
 
+    // Season/episode filtering — applies to ALL series results (including IMDB matches)
     if (normalizedType !== 'movie' && parsed.season !== undefined) {
-      const torrentSeason = this.extractSeason(torrent);
+      const torrentSeason = this.extractSeasonFromTorrent(torrent);
       if (torrentSeason !== undefined && torrentSeason !== parsed.season) {
         return false;
       }
 
       if (parsed.episode !== undefined) {
-        const torrentEpisode = this.extractEpisode(torrent);
+        const torrentEpisode = this.extractEpisodeFromTorrent(torrent);
+        // If torrent has a specific episode and it doesn't match, reject.
+        // But if torrentEpisode is undefined, it might be a season pack — allow it.
         if (torrentEpisode !== undefined && torrentEpisode !== parsed.episode) {
           return false;
         }
@@ -649,8 +654,8 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
   private hasEpisodePattern(torrent: TorrentLike): boolean {
     if (
-      this.extractSeason(torrent) !== undefined ||
-      this.extractEpisode(torrent) !== undefined ||
+      this.extractSeasonFromTorrent(torrent) !== undefined ||
+      this.extractEpisodeFromTorrent(torrent) !== undefined ||
       (this.extractEpisodeList(torrent)?.length ?? 0) > 0
     ) {
       return true;
@@ -806,6 +811,73 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       record['Episode'];
 
     return this.toNumber(candidate);
+  }
+
+  /**
+   * Extract season number from torrent: first from structured fields, then from title text.
+   * This is critical because the torrent-indexer does NOT return structured season/episode fields.
+   */
+  private extractSeasonFromTorrent(torrent: TorrentLike): number | undefined {
+    // Try structured fields first
+    const structured = this.extractSeason(torrent);
+    if (structured !== undefined) return structured;
+
+    // Parse from title text using S01E03 patterns
+    const title = this.extractTitle(torrent) || '';
+    const match = title.match(/S(\d{1,3})(?:E\d{1,3})?/i);
+    if (match?.[1]) {
+      const season = parseInt(match[1], 10);
+      if (!isNaN(season)) return season;
+    }
+
+    // Try "1x03" pattern
+    const altMatch = title.match(/(\d{1,2})x(\d{1,3})/i);
+    if (altMatch?.[1]) {
+      const season = parseInt(altMatch[1], 10);
+      if (!isNaN(season)) return season;
+    }
+
+    // Try "Temporada X" / "Season X"
+    const wordMatch = title.match(/(?:temporada|season)\s*(\d{1,3})/i);
+    if (wordMatch?.[1]) {
+      const season = parseInt(wordMatch[1], 10);
+      if (!isNaN(season)) return season;
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Extract episode number from torrent: first from structured fields, then from title text.
+   */
+  private extractEpisodeFromTorrent(torrent: TorrentLike): number | undefined {
+    // Try structured fields first
+    const structured = this.extractEpisode(torrent);
+    if (structured !== undefined) return structured;
+
+    // Parse from title text using S01E03 pattern
+    const title = this.extractTitle(torrent) || '';
+    const match = title.match(/S\d{1,3}E(\d{1,3})/i);
+    if (match?.[1]) {
+      const episode = parseInt(match[1], 10);
+      if (!isNaN(episode)) return episode;
+    }
+
+    // Try "1x03" pattern
+    const altMatch = title.match(/\d{1,2}x(\d{1,3})/i);
+    if (altMatch?.[1]) {
+      const episode = parseInt(altMatch[1], 10);
+      if (!isNaN(episode)) return episode;
+    }
+
+    // Try EP03 / E03 standalone
+    const epMatch = title.match(/\bE(?:P)?(\d{1,3})\b/i);
+    if (epMatch?.[1]) {
+      const episode = parseInt(epMatch[1], 10);
+      if (!isNaN(episode)) return episode;
+    }
+
+    return undefined;
   }
 
   private extractEpisodeList(torrent: TorrentLike): number[] | undefined {
@@ -1170,10 +1242,10 @@ private mapTorrentToStream(
       title = `${title} (${year})`;
     }
 
-    const season = this.extractSeason(torrent);
+    const season = this.extractSeasonFromTorrent(torrent);
     if (season !== undefined) {
       const seasonToken = `S${String(season).padStart(2, '0')}`;
-      const episode = this.extractEpisode(torrent);
+      const episode = this.extractEpisodeFromTorrent(torrent);
       const episodeToken = episode !== undefined ? `E${String(episode).padStart(2, '0')}` : undefined;
       const code = episodeToken ? `${seasonToken}${episodeToken}` : seasonToken;
 
@@ -1338,8 +1410,8 @@ private mapTorrentToStream(
       score += 6;
     }
 
-    const fileSeason = this.extractSeason({ title: file.path });
-    const fileEpisode = this.extractEpisode({ title: file.path });
+    const fileSeason = this.extractSeasonFromTorrent({ title: file.path });
+    const fileEpisode = this.extractEpisodeFromTorrent({ title: file.path });
     const episodeList = this.extractEpisodeList({ title: file.path, filesEpisodes: file.path });
 
     if (normalizedType === 'movie') {
@@ -1480,6 +1552,29 @@ private mapTorrentToStream(
     return undefined;
   }
 
+  private static readonly SITE_LABEL_MAP: Record<string, string> = {
+    'comando.la': 'Comando',
+    'comando.to': 'Comando',
+    'bludv.xyz': 'BluDV',
+    'bludv1.xyz': 'BluDV',
+    'bludv.org': 'BluDV',
+    'bludv.net': 'BluDV',
+    'bludv-v1.xyz': 'BluDV',
+    'bludv.tv': 'BluDV',
+    'bludv.in': 'BluDV',
+    'redetorrent.com': 'RedeTorrent',
+    'vacatorrent.com': 'VacaTorrent',
+    'vacatorrentmov.com': 'VacaTorrent',
+    'lapumia.org': 'LAPUMiA',
+    'ondebaixa.com': 'OndeBaixa',
+    'torrentdosfilmes.se': 'TorrentDosFilmes',
+    'thepiratefilmes.com': 'ThePirateFilmes',
+    'starckfilmes.com': 'StarckFilmes',
+    'torrentmovies.co': 'TorrentMovies',
+    'sitedetorrents.com': 'SiteDeTorrents',
+    'ytsbr.com': 'YTSBR',
+  };
+
   private extractSourceDomain(torrent: TorrentLike): string | undefined {
     const record = torrent as Record<string, unknown>;
     const candidates = [
@@ -1496,7 +1591,11 @@ private mapTorrentToStream(
 
       const hostname = this.parseHostname(candidate);
       if (hostname) {
-        return hostname;
+        // Normalize known site hostnames with versioned subdomains
+        const baseHost = hostname.replace(/^(www\.)?/, '').replace(/-v\d+/, '').replace(/\d+\./, '.');
+        return TorrentIndexerProvider.SITE_LABEL_MAP[hostname]
+          ?? TorrentIndexerProvider.SITE_LABEL_MAP[baseHost]
+          ?? hostname;
       }
     }
 
