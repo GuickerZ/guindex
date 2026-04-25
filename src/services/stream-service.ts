@@ -134,7 +134,7 @@ export class StreamService {
       debridProvider === 'torbox'
         ? isReady
           ? `${providerLabel}+`
-          : `${providerLabel}~`
+          : `${providerLabel}⏳`
         : isReady
           ? `${providerLabel}+`
           : providerLabel;
