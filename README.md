@@ -1,4 +1,4 @@
-# Brazuca RD - Stremio Addon
+# GuIndex - Stremio Addon
 
 Addon proxy that sends magnets/HTTP links through Real-Debrid or TorBox, returning direct playable URLs. Tuned for Vercel and ready to drop into AIOStreams.
 

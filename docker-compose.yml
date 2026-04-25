@@ -1,19 +1,19 @@
 version: '3.8'
 
 services:
-  brazuca-rd:
+  guindex-rd:
     build: .
     ports:
       - "7000:7000"
     environment:
       - PORT=7000
       - LOG_LEVEL=info
-      - BASE_URL=https://brazuca-rd.vercel.app/
+      - BASE_URL=https://guicker-dream-rd.vercel.app/
     volumes:
       - ./public:/app/public:ro
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('https://brazuca-rd.vercel.app/manifest.json', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"]
+      test: ["CMD", "node", "-e", "require('http').get('https://guicker-dream-rd.vercel.app/manifest.json', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) })"]
       interval: 30s
       timeout: 10s
       retries: 3

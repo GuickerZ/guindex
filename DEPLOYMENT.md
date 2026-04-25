@@ -1,6 +1,6 @@
 # Deployment Guide
 
-This guide covers various deployment options for the Brazuca RD Stremio Addon.
+This guide covers various deployment options for the GuIndex Stremio Addon.
 
 ## 🚀 Quick Deploy Options
 
@@ -36,8 +36,8 @@ This guide covers various deployment options for the Brazuca RD Stremio Addon.
 
 ```bash
 # Build and run
-docker build -t brazuca-rd .
-docker run -p 7000:7000 -e BASE_URL=http://localhost:7000 brazuca-rd
+docker build -t guindex-rd .
+docker run -p 7000:7000 -e BASE_URL=http://localhost:7000 guindex-rd
 
 # Or use docker-compose
 docker-compose up -d
@@ -47,11 +47,11 @@ docker-compose up -d
 
 ```bash
 # Build and push
-docker build -t yourusername/brazuca-rd .
-docker push yourusername/brazuca-rd
+docker build -t yourusername/guindex-rd .
+docker push yourusername/guindex-rd
 
 # Deploy anywhere
-docker run -p 7000:7000 -e BASE_URL=https://your-domain.com yourusername/brazuca-rd
+docker run -p 7000:7000 -e BASE_URL=https://your-domain.com yourusername/guindex-rd
 ```
 
 ## ☁️ Cloud Platform Specific
@@ -61,7 +61,7 @@ docker run -p 7000:7000 -e BASE_URL=https://your-domain.com yourusername/brazuca
 1. **Install Serverless Framework**: `npm i -g serverless`
 2. **Create `serverless.yml`**:
    ```yaml
-   service: brazuca-rd
+   service: guindex-rd
    provider:
      name: aws
      runtime: nodejs18.x
@@ -78,17 +78,17 @@ docker run -p 7000:7000 -e BASE_URL=https://your-domain.com yourusername/brazuca
 
 ### Google Cloud Run
 
-1. **Build**: `gcloud builds submit --tag gcr.io/PROJECT-ID/brazuca-rd`
-2. **Deploy**: `gcloud run deploy --image gcr.io/PROJECT-ID/brazuca-rd --platform managed`
+1. **Build**: `gcloud builds submit --tag gcr.io/PROJECT-ID/guindex-rd`
+2. **Deploy**: `gcloud run deploy --image gcr.io/PROJECT-ID/guindex-rd --platform managed`
 
 ### Azure Container Instances
 
 ```bash
 # Build and push to Azure Container Registry
-az acr build --registry myregistry --image brazuca-rd .
+az acr build --registry myregistry --image guindex-rd .
 
 # Deploy
-az container create --resource-group myResourceGroup --name brazuca-rd --image myregistry.azurecr.io/brazuca-rd:latest --ports 7000
+az container create --resource-group myResourceGroup --name guindex-rd --image myregistry.azurecr.io/guindex-rd:latest --ports 7000
 ```
 
 ## 🔧 Environment Configuration
@@ -240,8 +240,8 @@ jobs:
 
 ### Repository
 
-- **GitHub**: [https://github.com/andremoreirasmo/brazuca-rd](https://github.com/andremoreirasmo/brazuca-rd)
-- **Issues**: [https://github.com/andremoreirasmo/brazuca-rd/issues](https://github.com/andremoreirasmo/brazuca-rd/issues)
+- **GitHub**: [https://github.com/guicker/guindex-rd](https://github.com/guicker/guindex-rd)
+- **Issues**: [https://github.com/guicker/guindex-rd/issues](https://github.com/guicker/guindex-rd/issues)
 
 ---
 

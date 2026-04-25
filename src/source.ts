@@ -8,7 +8,7 @@ export interface SourceStream {
   url?: string; // some addons return url
   magnet?: string; // prefer magnet
   infoHash?: string; // sometimes present
-  // Additional metadata from Brazuca
+  // Additional metadata from source providers
   size?: number; // file size in bytes
   seeders?: number; // number of seeders
   quality?: string; // video quality (1080p, 4K, etc.)
@@ -40,7 +40,7 @@ export class TorrentAddonSourceClient {
       if (mag) out.magnet = mag;
       if (s.infoHash) out.infoHash = s.infoHash;
       
-      // Capture additional metadata from Brazuca
+      // Capture additional metadata from providers
       if (s.size) out.size = s.size;
       if (s.seeders) out.seeders = s.seeders;
       if (s.quality) out.quality = s.quality;

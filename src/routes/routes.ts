@@ -179,7 +179,7 @@ export function setupRoutes() {
     reply
       .status(204)
       .header('cache-control', 'no-store, max-age=0')
-      .header('x-brazuca-rd-probe', 'ok')
+      .header('x-guindex-probe', 'ok')
       .send();
   };
 

@@ -41,6 +41,11 @@ interface CinemetaMeta {
 
 type TorrentLike = Record<string, unknown>;
 
+interface IndexedTorrentFile {
+  path: string;
+  size?: number;
+}
+
 const MAX_STREAMS = 60;
 const EPISODIC_HINT_REGEX =
   /(S[0-9]{1,3}(E[0-9]{1,3})?|S[0-9]{1,3}[._ -]?(19|20)[0-9]{2}|[0-9]+x[0-9]+|temporadas?|season|epis[oó]dios?|epis[oó]dio|episode|serie|série|minissérie|mini[\s-]?serie|ep[0-9]+|cap[ií]tulo|capitulo|completa|complete|collection|box\s*set|pack)/i;
@@ -130,30 +135,52 @@ const LANGUAGE_ALIASES: Record<string, string> = {
   english: 'English',
   ingles: 'English',
   eng: 'English',
+  en: 'English',
   spanish: 'Spanish',
   espanhol: 'Spanish',
   espanol: 'Spanish',
+  spa: 'Spanish',
+  es: 'Spanish',
   castellano: 'Spanish',
   latino: 'Spanish',
   french: 'French',
   frances: 'French',
+  fre: 'French',
+  fra: 'French',
+  fr: 'French',
   italian: 'Italian',
   italiano: 'Italian',
+  ita: 'Italian',
+  it: 'Italian',
   german: 'German',
   alemao: 'German',
+  ger: 'German',
+  deu: 'German',
+  de: 'German',
   japanese: 'Japanese',
   japones: 'Japanese',
+  jpn: 'Japanese',
+  ja: 'Japanese',
   korean: 'Korean',
   coreano: 'Korean',
+  kor: 'Korean',
+  ko: 'Korean',
   chinese: 'Chinese',
   chines: 'Chinese',
   mandarim: 'Chinese',
   mandarin: 'Chinese',
+  chi: 'Chinese',
+  zho: 'Chinese',
+  zh: 'Chinese',
   cantonese: 'Cantonese',
   cantones: 'Cantonese',
   russian: 'Russian',
   russo: 'Russian',
+  rus: 'Russian',
+  ru: 'Russian',
   hindi: 'Hindi',
+  hin: 'Hindi',
+  hi: 'Hindi',
   arabic: 'Arabic',
   arabe: 'Arabic',
   turkish: 'Turkish',
@@ -979,7 +1006,10 @@ private mapTorrentToStream(
     this.extractIndexerName(torrent) ||
     this.titleize(this.name);
 
-  const size = this.extractSize(torrent);
+  const selectedFile = this.selectBestTorrentFile(torrent, context);
+  const selectedFileName = selectedFile?.path;
+
+  const size = selectedFile?.size ?? this.extractSize(torrent);
   const releaseYear = this.extractYear(torrent);
   const rawQuality =
     (torrent as Record<string, unknown>).quality ||
@@ -1005,7 +1035,7 @@ private mapTorrentToStream(
   const languages = this.extractAudioLanguages(torrent);
 
   const headline = quality ? `${displayTitle} [${quality}]` : displayTitle;
-  const titleLines = [headline]; // **removido**: [RD] padrão
+  const titleLines = [headline];
   if (infoSegments.some((segment) => segment.trim().length > 0)) {
     titleLines.push(infoSegments.join(' '));
   }
@@ -1018,7 +1048,7 @@ private mapTorrentToStream(
   }
 
   const qualityLabel = quality ?? 'RD';
-  const nameLines = [`[${sourceLabel}]`]; // **removido**: RD Brazuca padrão
+  const nameLines = [`[${sourceLabel}]`];
   if (qualityLabel) {
     nameLines.push(qualityLabel);
   }
@@ -1026,7 +1056,7 @@ private mapTorrentToStream(
   const stream: SourceStream = {
     name: nameLines.join('\n'),
     title: titleLines.join('\n'),
-    fileName: this.extractFileName(torrent) || displayTitle,
+    fileName: selectedFileName || this.extractFileName(torrent) || displayTitle,
     source: sourceLabel,
     magnet,
     cached: false
@@ -1237,7 +1267,134 @@ private mapTorrentToStream(
       tags.forEach(addLanguage);
     }
 
+    if (sawDualAudio && languages.has('Portuguese') && !languages.has('English')) {
+      languages.add('English');
+    }
+
     return Array.from(languages);
+  }
+
+  private selectBestTorrentFile(torrent: TorrentLike, context: MatchContext): IndexedTorrentFile | undefined {
+    const files = this.extractFilesFromTorrent(torrent);
+    if (files.length === 0) {
+      return undefined;
+    }
+
+    const scored = files
+      .map((file) => ({ file, score: this.scoreTorrentFile(file, context) }))
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return (b.file.size ?? 0) - (a.file.size ?? 0);
+      });
+
+    return scored[0]?.file;
+  }
+
+  private scoreTorrentFile(file: IndexedTorrentFile, context: MatchContext): number {
+    const normalizedPath = this.normalizeForComparison(file.path);
+    const normalizedType = context.type.toLowerCase();
+    let score = 0;
+
+    // Prefer real video files and penalize common junk files.
+    if (this.isVideoPath(file.path)) score += 30;
+    if (/\b(sample|trailer|extras?|bonus|featurette|behindthescenes|creditos|poster|rarbg|nfo|subs?)\b/i.test(file.path)) {
+      score -= 25;
+    }
+    if (/\.(txt|url|nfo|jpg|jpeg|png|gif|bmp|ico|md)$/i.test(file.path)) {
+      score -= 40;
+    }
+
+    for (const title of context.targetTitles) {
+      const normalizedTitle = this.normalizeForComparison(title);
+      if (!normalizedTitle) continue;
+      if (normalizedPath.includes(normalizedTitle)) {
+        score += 10;
+        break;
+      }
+    }
+
+    if (context.releaseYear && normalizedPath.includes(String(context.releaseYear))) {
+      score += 6;
+    }
+
+    const fileSeason = this.extractSeason({ title: file.path });
+    const fileEpisode = this.extractEpisode({ title: file.path });
+    const episodeList = this.extractEpisodeList({ title: file.path, filesEpisodes: file.path });
+
+    if (normalizedType === 'movie') {
+      if (fileSeason !== undefined || fileEpisode !== undefined) {
+        score -= 20;
+      }
+      if (EPISODIC_HINT_REGEX.test(file.path)) {
+        score -= 12;
+      }
+    } else if (context.parsed.season !== undefined) {
+      if (fileSeason !== undefined) {
+        score += fileSeason === context.parsed.season ? 12 : -18;
+      }
+      if (context.parsed.episode !== undefined) {
+        if (fileEpisode !== undefined) {
+          score += fileEpisode === context.parsed.episode ? 18 : -24;
+        }
+        if (episodeList && episodeList.length > 0) {
+          score += episodeList.includes(context.parsed.episode) ? 14 : -24;
+        }
+      }
+    }
+
+    score += Math.log10((file.size ?? 0) + 1);
+    return score;
+  }
+
+  private extractFilesFromTorrent(torrent: TorrentLike): IndexedTorrentFile[] {
+    const filesRaw = (torrent as Record<string, unknown>).files;
+    if (!Array.isArray(filesRaw)) {
+      return [];
+    }
+
+    const files: IndexedTorrentFile[] = [];
+    for (const entry of filesRaw) {
+      if (!entry || typeof entry !== 'object') continue;
+      const record = entry as Record<string, unknown>;
+      const pathCandidate = this.toString(record.path) || this.toString(record.name) || this.toString(record.file);
+      if (!pathCandidate || !pathCandidate.trim()) continue;
+
+      const sizeRaw = record.size ?? record.sizeBytes ?? record.size_bytes ?? record.bytes;
+      const size = this.toBytes(sizeRaw);
+      files.push({ path: pathCandidate.trim(), size });
+    }
+
+    return files;
+  }
+
+  private toBytes(value: unknown): number | undefined {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return Math.max(0, Math.floor(value));
+    }
+
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+
+    const numeric = Number(trimmed.replace(/[^0-9.]/g, ''));
+    if (Number.isNaN(numeric)) {
+      return undefined;
+    }
+
+    if (/\b(tb|terabyte)/i.test(trimmed)) return Math.round(numeric * 1024 * 1024 * 1024 * 1024);
+    if (/\b(gb|gigabyte)/i.test(trimmed)) return Math.round(numeric * 1024 * 1024 * 1024);
+    if (/\b(mb|megabyte)/i.test(trimmed)) return Math.round(numeric * 1024 * 1024);
+    if (/\b(kb|kilobyte)/i.test(trimmed)) return Math.round(numeric * 1024);
+    return Math.round(numeric);
+  }
+
+  private isVideoPath(path: string): boolean {
+    return /\.(mkv|mp4|avi|m4v|ts|m2ts|mov|wmv|flv|webm|mpg|mpeg|iso)$/i.test(path);
   }
 
   private mapLanguageToDisplay(language: string): string {

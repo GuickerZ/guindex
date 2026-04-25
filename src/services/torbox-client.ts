@@ -71,7 +71,7 @@ export class TorboxClient {
   constructor(options: TorboxClientOptions) {
     this.token = options.token;
     this.baseUrl = (options.baseUrl || 'https://api.torbox.app').replace(/\/$/, '');
-    this.userAgent = options.userAgent || 'brazuca-rd';
+    this.userAgent = options.userAgent || 'guindex-rd';
   }
 
   private headers(): Record<string, string> {

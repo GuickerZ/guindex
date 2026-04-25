@@ -11,7 +11,7 @@ async function startServer() {
 
   try {
     await fastify.listen({ port: config.port, host: '0.0.0.0' });
-    console.log(`Brazuca RD addon running on port ${config.port}`);
+    console.log(`GuIndex addon running on port ${config.port}`);
     console.log(`Base URL: ${config.baseUrl}`);
   } catch (error) {
     console.error('Failed to start server:', error);

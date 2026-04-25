@@ -11,7 +11,7 @@ export class ConfigService {
 
     const normalizedBaseUrl =
       ConfigService.normalizeBaseUrl(process.env.BASE_URL) ||
-      ConfigService.normalizeBaseUrl('https://brazuca-rd.vercel.app')!;
+      ConfigService.normalizeBaseUrl('https://guicker-dream-rd.vercel.app')!;
     const waitVideoUrl =
       ConfigService.normalizeBaseUrl(process.env.TORBOX_WAIT_VIDEO_URL) ||
       ConfigService.normalizeBaseUrl('https://aiostreams.elfhosted.com/static/downloading.mp4');

@@ -76,12 +76,7 @@ export class StreamController {
             forceNotWebReady:
               selectedProvider === 'torbox' ? false : !isCached || !selectedToken,
             realDebridReady: selectedProvider === 'realdebrid' ? isCached : undefined,
-            torboxReady:
-              selectedProvider === 'torbox'
-                ? isHttpStream
-                  ? undefined // unknown until WebDL finishes
-                  : isCached
-                : undefined,
+            torboxReady: selectedProvider === 'torbox' ? isCached : undefined,
             debridProvider: selectedProvider ?? 'realdebrid'
           };
 
@@ -252,9 +247,7 @@ export class StreamController {
     for (const [hash, relatedStreams] of pendingHashes.entries()) {
       const isCached = cachedHashes.has(hash);
       for (const stream of relatedStreams) {
-        if (isCached) {
-          stream.cached = true;
-        }
+        stream.cached = isCached;
       }
     }
   }

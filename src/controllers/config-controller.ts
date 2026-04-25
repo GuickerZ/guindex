@@ -9,11 +9,11 @@ export class ConfigController {
 
   createAddonManifest(isConfigured: boolean = false): AddonManifest {
     return {
-      id: 'org.andre.brazuca-rd',
+      id: 'org.guindex.rd',
       version: '1.0.0',
-      name: 'Brazuca RD',
+      name: 'GuIndex',
       description:
-        'Proxies Brazuca Torrents addon magnets through Real-Debrid or Torbox into direct streams. Credits: Brazuca Torrents addon author.',
+        'Proxies torrent-indexer results through Real-Debrid or Torbox into direct streams.',
       catalogs: [],
       resources: ['stream'],
       types: ['movie', 'series'],
@@ -64,7 +64,7 @@ export class ConfigController {
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Brazuca RD Configuration</title>
+  <title>GuIndex Configuration</title>
   <style>
     body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
     .container { max-width: 520px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
@@ -83,10 +83,9 @@ export class ConfigController {
 </head>
 <body>
   <div class="container">
-    <h1>Brazuca RD Configuration</h1>
+    <h1>GuIndex Configuration</h1>
     <div class="info">
-      <strong>Brazuca RD</strong> - Proxies Brazuca Torrents through Real-Debrid or Torbox for direct streaming.<br>
-      <strong>Credits:</strong> <a href="https://94c8cb9f702d-brazuca-torrents.baby-beamup.club/" class="link" target="_blank">Brazuca Torrents addon</a>
+      <strong>GuIndex</strong> - Proxies torrent-indexer results through Real-Debrid or Torbox for direct streaming.
     </div>
     <form id="configForm">
       <div class="form-group">

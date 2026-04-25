@@ -1,7 +1,7 @@
 {
-  "name": "stremio-brazuca-rd",
+  "name": "stremio-guindex-rd",
   "version": "1.0.0",
-  "description": "Stremio addon that proxies Brazuca Torrents magnets through Real-Debrid into direct HTTP streams. Credits to Brazuca Torrents addon author.",
+  "description": "Stremio addon that proxies torrent-indexer streams through Real-Debrid or Torbox into direct HTTP streams.",
   "main": "index.js",
   "scripts": {
     "dev": "nodemon --exec \"npx ts-node --project tsconfig.dev.json --esm src/server.ts\" --watch src --ext ts,js",

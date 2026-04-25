@@ -144,7 +144,7 @@ function normalizeStream(stream: SourceStream, providerLabel: string): SourceStr
   if (result.name) {
     result.name = prefixName(result.name);
   } else if (providerLabel) {
-    result.name = `[Brazuca RD] ${providerLabel}`;
+    result.name = `[GuIndex] ${providerLabel}`;
   }
 
   return result;
@@ -152,12 +152,12 @@ function normalizeStream(stream: SourceStream, providerLabel: string): SourceStr
 
 function prefixName(name: string): string {
   if (!name) {
-    return '[Brazuca RD]';
+    return '[GuIndex]';
   }
-  if (/\bBrazuca RD\b/i.test(name)) {
+  if (/\bGuIndex\b/i.test(name)) {
     return name;
   }
-  return `[Brazuca RD] ${name}`;
+  return `[GuIndex] ${name}`;
 }
 
 function collectLines(...values: Array<string | undefined>): string[] {

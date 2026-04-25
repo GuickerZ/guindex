@@ -19,30 +19,92 @@ const LANGUAGE_DISPLAY_ALIASES: Record<string, string> = {
   english: 'English',
   ingles: 'English',
   eng: 'English',
+  en: 'English',
   spanish: 'Spanish',
   espanhol: 'Spanish',
   espanol: 'Spanish',
+  spa: 'Spanish',
+  es: 'Spanish',
   castellano: 'Spanish',
   latino: 'Spanish',
   french: 'French',
   frances: 'French',
+  fre: 'French',
+  fra: 'French',
+  fr: 'French',
   italian: 'Italian',
   italiano: 'Italian',
+  ita: 'Italian',
+  it: 'Italian',
   german: 'German',
   alemao: 'German',
+  ger: 'German',
+  deu: 'German',
+  de: 'German',
   japanese: 'Japanese',
   japones: 'Japanese',
+  jpn: 'Japanese',
+  ja: 'Japanese',
   korean: 'Korean',
   coreano: 'Korean',
+  kor: 'Korean',
+  ko: 'Korean',
   chinese: 'Chinese',
   chines: 'Chinese',
   mandarin: 'Chinese',
   mandarim: 'Chinese',
+  chi: 'Chinese',
+  zho: 'Chinese',
+  zh: 'Chinese',
   russian: 'Russian',
   russo: 'Russian',
+  rus: 'Russian',
+  ru: 'Russian',
   hindi: 'Hindi',
+  hin: 'Hindi',
+  hi: 'Hindi',
   arabic: 'Arabic',
-  arabe: 'Arabic'
+  arabe: 'Arabic',
+  turkish: 'Turkish',
+  turco: 'Turkish',
+  tur: 'Turkish',
+  tr: 'Turkish',
+  polish: 'Polish',
+  polones: 'Polish',
+  pol: 'Polish',
+  pl: 'Polish',
+  dutch: 'Dutch',
+  holandes: 'Dutch',
+  nld: 'Dutch',
+  nl: 'Dutch',
+  swedish: 'Swedish',
+  sueco: 'Swedish',
+  swe: 'Swedish',
+  sv: 'Swedish',
+  norwegian: 'Norwegian',
+  noruegues: 'Norwegian',
+  nor: 'Norwegian',
+  no: 'Norwegian',
+  danish: 'Danish',
+  dinamarques: 'Danish',
+  dan: 'Danish',
+  da: 'Danish',
+  finnish: 'Finnish',
+  finlandes: 'Finnish',
+  fin: 'Finnish',
+  fi: 'Finnish',
+  czech: 'Czech',
+  tcheco: 'Czech',
+  ces: 'Czech',
+  cs: 'Czech',
+  hungarian: 'Hungarian',
+  hungaro: 'Hungarian',
+  hun: 'Hungarian',
+  hu: 'Hungarian',
+  ukrainian: 'Ukrainian',
+  ucraniano: 'Ukrainian',
+  ukr: 'Ukrainian',
+  uk: 'Ukrainian'
 };
 
 interface StreamMetadataOptions {
@@ -76,7 +138,7 @@ export class StreamService {
         : isReady
           ? `${providerLabel}+`
           : providerLabel;
-    const baseName = sourceStream.name || `[Brazuca Debrid] ${displayTitle}`;
+    const baseName = sourceStream.name || `[GuIndex] ${displayTitle}`;
 
     const displayName =
       debridProvider === 'torbox'
@@ -87,6 +149,20 @@ export class StreamService {
       title: displayTitle,
       url
     };
+
+    const infoHash = StreamService.extractInfoHash(sourceStream);
+    if (infoHash) {
+      metadata.infoHash = infoHash;
+    }
+    if (sourceStream.size != undefined) {
+      metadata.size = sourceStream.size;
+    }
+    if (sourceStream.seeders != undefined) {
+      metadata.seeders = sourceStream.seeders;
+    }
+    if (sourceStream.quality) {
+      metadata.quality = sourceStream.quality;
+    }
     if (normalizedLanguages.length > 0) {
       metadata.languages = normalizedLanguages;
     }
@@ -100,6 +176,9 @@ export class StreamService {
 
     if (debridProvider === 'torbox') {
       behaviorHints.torboxReady = isReady;
+      if (!isReady) {
+        behaviorHints.notWebReady = true;
+      }
       const bingeGroup = StreamService.buildBingeGroup(sourceStream, debridProvider);
       if (bingeGroup) {
         behaviorHints.bingeGroup = bingeGroup;
@@ -201,40 +280,58 @@ export class StreamService {
   private static detectLanguages(stream: SourceStream): string[] {
     const fromSource = Array.isArray(stream.languages) ? stream.languages : [];
     const text = `${stream.fileName ?? ''} ${stream.title ?? ''}`.toLowerCase();
+    const normalizedText = StreamService.normalizeLanguageKey(text);
 
     const detected: string[] = [];
-    if (/\b(pt[\s\.\-_]?br|brazilian|dublado|dublada|portuguese|portugues)\b/.test(text)) {
+    if (/\b(pt[\s\.\-_]?br|brazilian|dublado|dublada|portuguese|portugues|ptbr)\b/.test(normalizedText)) {
       detected.push('Portuguese');
     }
-    if (/\b(english|eng)\b/.test(text)) {
+    if (/\b(english|eng|en)\b/.test(normalizedText)) {
       detected.push('English');
     }
-    if (/\b(spanish|espanol|español|latino|castellano|spa)\b/.test(text)) {
+    if (/\b(spanish|espanol|latino|castellano|spa|es)\b/.test(normalizedText)) {
       detected.push('Spanish');
     }
-    if (/\b(french|frances|fr)\b/.test(text)) {
+    if (/\b(french|frances|fre|fra|fr)\b/.test(normalizedText)) {
       detected.push('French');
     }
-    if (/\b(italian|italiano|ita)\b/.test(text)) {
+    if (/\b(italian|italiano|ita)\b/.test(normalizedText)) {
       detected.push('Italian');
     }
-    if (/\b(german|alemao|ger|de)\b/.test(text)) {
+    if (/\b(german|alemao|ger|deu|de)\b/.test(normalizedText)) {
       detected.push('German');
     }
-    if (/\b(japanese|japones|jpn)\b/.test(text)) {
+    if (/\b(japanese|japones|jpn|ja)\b/.test(normalizedText)) {
       detected.push('Japanese');
     }
-    if (/\b(korean|coreano|kor|ko)\b/.test(text)) {
+    if (/\b(korean|coreano|kor|ko)\b/.test(normalizedText)) {
       detected.push('Korean');
     }
-    if (/\b(chinese|chines|mandarin|chi|zh)\b/.test(text)) {
+    if (/\b(chinese|chines|mandarin|mandarim|chi|zho|zh)\b/.test(normalizedText)) {
       detected.push('Chinese');
     }
-    if (/\b(russian|russo|rus|ru)\b/.test(text)) {
+    if (/\b(russian|russo|rus|ru)\b/.test(normalizedText)) {
       detected.push('Russian');
     }
-    if (/\b(hindi|hin)\b/.test(text)) {
+    if (/\b(hindi|hin|hi)\b/.test(normalizedText)) {
       detected.push('Hindi');
+    }
+    if (/\b(turkish|turco|tur|tr)\b/.test(normalizedText)) {
+      detected.push('Turkish');
+    }
+    if (/\b(polish|polones|pol|pl)\b/.test(normalizedText)) {
+      detected.push('Polish');
+    }
+    if (/\b(dutch|holandes|nld|nl)\b/.test(normalizedText)) {
+      detected.push('Dutch');
+    }
+    if (/\b(ukrainian|ucraniano|ukr|uk)\b/.test(normalizedText)) {
+      detected.push('Ukrainian');
+    }
+
+    // Many releases tag "Dual Audio" without listing the second language explicitly.
+    if (/\bdual\s*audio\b/.test(normalizedText) && detected.includes('Portuguese') && !detected.includes('English')) {
+      detected.push('English');
     }
 
     return StreamService.normalizeLanguages([...fromSource, ...detected]);
@@ -296,6 +393,19 @@ export class StreamService {
 
     const newBase = `${base} ${missing.join(' ')}`;
     return `${newBase}${ext}`;
+  }
+
+  private static extractInfoHash(stream: SourceStream): string | undefined {
+    if (typeof stream.infoHash === 'string' && stream.infoHash.trim()) {
+      return stream.infoHash.trim().toLowerCase();
+    }
+
+    const magnet = stream.magnet || (stream.url?.startsWith('magnet:') ? stream.url : undefined);
+    if (!magnet) return undefined;
+
+    const match = magnet.match(/xt=urn:btih:([^&]+)/i);
+    if (!match?.[1]) return undefined;
+    return match[1].trim().toLowerCase();
   }
 
   private static languageCodeTokens(languages: string[]): string[] {

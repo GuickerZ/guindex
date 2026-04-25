@@ -127,21 +127,24 @@ export class TorboxService {
           return undefined;
         };
 
-        if (ready) {
-          const link = await tryLinks();
-          if (link) {
-            const chosen = file ?? info.files?.[0];
-            console.debug('[TorBox] link acquired', {
-              torrentId: torrent_id,
-              fileId: chosen?.id,
-              name: chosen?.name || chosen?.short_name,
-              size: chosen?.size
-            });
-            return { url: link, ready: true, fileName: chosen?.name, size: chosen?.size };
-          }
+        const link = await tryLinks();
+        if (link) {
+          const chosen = file ?? info.files?.[0];
+          const effectiveReady = ready && !this.isWaitingLikeLink(link);
+          console.debug('[TorBox] link acquired', {
+            torrentId: torrent_id,
+            fileId: chosen?.id,
+            name: chosen?.name || chosen?.short_name,
+            size: chosen?.size,
+            ready,
+            effectiveReady,
+            waitingLike: !effectiveReady
+          });
+          return { url: link, ready: effectiveReady, fileName: chosen?.name, size: chosen?.size };
         }
+
         if (ready) {
-          console.debug('[TorBox] ready but no link from requestdl');
+          console.debug('[TorBox] ready but no link from requestdl or wait link');
         }
         return undefined;
       };
@@ -153,7 +156,7 @@ export class TorboxService {
         if (res) return res;
       }
 
-      console.debug('[TorBox] no link after attempts, returning wait video');
+      console.debug('[TorBox] no link after attempts, returning configured wait video fallback');
       return this.placeholderResult();
     } catch (err) {
       console.debug('[TorBox] error in processMagnetToDirectUrl', err);
@@ -170,11 +173,24 @@ export class TorboxService {
         const web = await this.client.getWebDl(webdownload_id);
         const file = this.selectBestFile(web.files || [], context);
         const ready = this.isReady(web);
-        if (ready && file?.id !== undefined) {
+        if (file?.id !== undefined) {
           const link = await this.safeCall(() =>
             this.client.requestWebDlLink({ webId: webdownload_id, fileId: file.id })
           );
-          if (link) return { url: link, ready: true, fileName: file.name, size: file.size };
+          if (link) {
+            const effectiveReady = ready && !this.isWaitingLikeLink(link);
+            return { url: link, ready: effectiveReady, fileName: file.name, size: file.size };
+          }
+        }
+
+        if (file?.id === undefined) {
+          const linkNoFile = await this.safeCall(() =>
+            this.client.requestWebDlLink({ webId: webdownload_id })
+          );
+          if (linkNoFile) {
+            const effectiveReady = ready && !this.isWaitingLikeLink(linkNoFile);
+            return { url: linkNoFile, ready: effectiveReady };
+          }
         }
         return undefined;
       };
@@ -222,6 +238,11 @@ export class TorboxService {
     );
   }
 
+  private isWaitingLikeLink(url: string): boolean {
+    const normalized = url.toLowerCase();
+    return /downloading\.mp4|wait|waiting|processing|placeholder/.test(normalized);
+  }
+
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
@@ -242,9 +263,22 @@ export class TorboxService {
   }
 
   private scoreFileAgainstContext(file: TorboxFile, context?: StreamContext): number {
-    if (!context) return Math.log10((file.size ?? 0) + 1);
-    const path = this.normalize(file.name || file.short_name || file.path || '');
+    const rawPath = file.name || file.short_name || file.path || '';
+    if (!context) {
+      let score = Math.log10((file.size ?? 0) + 1);
+      if (/\b(sample|trailer|extras?|bonus|featurette|behindthescenes|poster|creditos|credits?)\b/i.test(rawPath)) {
+        score -= 30;
+      }
+      return score;
+    }
+
+    const path = this.normalize(rawPath);
+    const rawLower = rawPath.toLowerCase();
     let score = 0;
+
+    if (/\b(sample|trailer|extras?|bonus|featurette|behindthescenes|poster|creditos|credits?)\b/i.test(rawLower)) {
+      score -= 30;
+    }
 
     if (context.year && path.includes(String(context.year))) score += 4;
     if (context.title) {
@@ -255,8 +289,24 @@ export class TorboxService {
       const t = this.normalize(context.episodeTitle);
       if (t && path.includes(t)) score += 8;
     }
+
+    if (context.type === 'movie' && /\bs\d{1,2}e\d{1,3}\b|\b\d{1,2}x\d{1,3}\b/i.test(rawLower)) {
+      score -= 16;
+    }
+
+    // In multi-episode packs, prefer files whose episode markers are explicitly requested.
+    if (Array.isArray(context.episodeList) && context.episodeList.length > 0) {
+      const hasRequestedEpisode = context.episodeList.some((ep) => {
+        const epPadded = String(ep).padStart(2, '0');
+        return new RegExp(`\\be${ep}\\b|\\be${epPadded}\\b|\\bep${ep}\\b|\\bep${epPadded}\\b|\\b${ep}x\\d{1,2}\\b|\\b\\d{1,2}x${epPadded}\\b`, 'i').test(rawLower);
+      });
+      if (hasRequestedEpisode) {
+        score += 12;
+      }
+    }
+
     if (context.episode !== undefined) {
-      score += this.scoreEpisodeMatch(path, context);
+      score += this.scoreEpisodeMatch(rawLower, context);
     }
     return score + Math.log10((file.size ?? 0) + 1);
   }
