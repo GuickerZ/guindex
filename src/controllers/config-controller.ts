@@ -248,7 +248,10 @@ export class ConfigController {
         <div class="helper"><a href="https://torbox.app/settings" target="_blank" style="color:var(--accent)">Obter token &rarr;</a></div>
       </div>
 
-      <button type="submit" class="btn">${buttonText}</button>
+      <div style="display: flex; gap: 10px; margin-top: 8px;">
+        <button type="button" id="installBtn" class="btn">Instalar no Stremio</button>
+        <button type="button" id="copyBtn" class="btn" style="background: var(--surface-2); color: var(--text); border: 1px solid var(--border);">Copiar URL</button>
+      </div>
     </form>
 
     <div class="divider"></div>
@@ -299,20 +302,33 @@ export class ConfigController {
       provEl.addEventListener('change', toggle);
       toggle();
 
-      document.getElementById('configForm').addEventListener('submit', function(e) {
-        e.preventDefault();
+      function buildUrl() {
         var prov = provEl.value;
         var rd = document.getElementById('rdToken').value.trim();
         var tb = document.getElementById('tbToken').value.trim();
         var token = prov === 'torbox' ? tb : rd;
-        if (!token) { alert('Preencha o token do provedor selecionado.'); return; }
+        if (!token) { alert('Preencha o token do provedor selecionado.'); return null; }
 
         var params = new URLSearchParams();
         params.set('debridProvider', prov);
         if (rd) params.set('realdebridToken', rd);
         if (tb) params.set('torboxToken', tb);
-        var url = baseUrl + '/manifest.json?' + params.toString();
+        return baseUrl + '/manifest.json?' + params.toString();
+      }
 
+      document.getElementById('installBtn').addEventListener('click', function(e) {
+        e.preventDefault();
+        var url = buildUrl();
+        if (!url) return;
+        var stremioUrl = url.replace(/^https?:\/\//i, 'stremio://');
+        window.location.href = stremioUrl;
+        setTimeout(function() { showToast('Tentando abrir o Stremio...'); }, 100);
+      });
+
+      document.getElementById('copyBtn').addEventListener('click', function(e) {
+        e.preventDefault();
+        var url = buildUrl();
+        if (!url) return;
         navigator.clipboard.writeText(url).then(function() {
           showToast('URL copiada! Cole no Stremio para instalar.');
         }).catch(function() {
