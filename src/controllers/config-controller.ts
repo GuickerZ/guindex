@@ -249,7 +249,7 @@ export class ConfigController {
       </div>
 
       <div style="display: flex; gap: 10px; margin-top: 8px;">
-        <button type="button" id="installBtn" class="btn">Instalar no Stremio</button>
+        <a id="installBtn" class="btn" href="#" style="text-align:center; text-decoration:none; display:flex; align-items:center; justify-content:center; box-sizing: border-box;">Instalar no Stremio</a>
         <button type="button" id="copyBtn" class="btn" style="background: var(--surface-2); color: var(--text); border: 1px solid var(--border);">Copiar URL</button>
       </div>
     </form>
@@ -307,7 +307,7 @@ export class ConfigController {
         var rd = document.getElementById('rdToken').value.trim();
         var tb = document.getElementById('tbToken').value.trim();
         var token = prov === 'torbox' ? tb : rd;
-        if (!token) { alert('Preencha o token do provedor selecionado.'); return null; }
+        if (!token) { return null; }
 
         var params = new URLSearchParams();
         params.set('debridProvider', prov);
@@ -316,19 +316,37 @@ export class ConfigController {
         return baseUrl + '/manifest.json?' + params.toString();
       }
 
-      document.getElementById('installBtn').addEventListener('click', function(e) {
-        e.preventDefault();
+      function updateInstallLink() {
         var url = buildUrl();
-        if (!url) return;
-        var stremioUrl = url.replace(/^https?:\/\//i, 'stremio://');
-        window.location.href = stremioUrl;
+        var installBtn = document.getElementById('installBtn');
+        if (url) {
+          installBtn.href = url.replace(/^https?:\/\//i, 'stremio://');
+        } else {
+          installBtn.href = '#';
+        }
+      }
+
+      document.getElementById('provider').addEventListener('change', updateInstallLink);
+      document.getElementById('rdToken').addEventListener('input', updateInstallLink);
+      document.getElementById('tbToken').addEventListener('input', updateInstallLink);
+      updateInstallLink();
+
+      document.getElementById('installBtn').addEventListener('click', function(e) {
+        if (this.getAttribute('href') === '#') {
+          e.preventDefault();
+          alert('Preencha o token do provedor selecionado antes de instalar.');
+          return;
+        }
         setTimeout(function() { showToast('Tentando abrir o Stremio...'); }, 100);
       });
 
       document.getElementById('copyBtn').addEventListener('click', function(e) {
         e.preventDefault();
         var url = buildUrl();
-        if (!url) return;
+        if (!url) {
+          alert('Preencha o token do provedor selecionado antes de copiar a URL.');
+          return;
+        }
         navigator.clipboard.writeText(url).then(function() {
           showToast('URL copiada! Cole no Stremio para instalar.');
         }).catch(function() {
