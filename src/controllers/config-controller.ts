@@ -33,8 +33,8 @@ export class ConfigController {
           type: 'select',
           title: 'Provedor Debrid',
           description: 'Escolha qual provedor premium sera usado para reproducao.',
-          options: ['realdebrid', 'torbox'],
-          default: 'realdebrid'
+          options: ['torbox', 'realdebrid'],
+          default: 'torbox'
         },
         {
           key: 'realdebridToken',
@@ -61,7 +61,7 @@ export class ConfigController {
     isConfigured: boolean = false
   ): string {
     const buttonText = isConfigured ? 'Salvar' : 'Instalar Addon';
-    const provider = config?.debridProvider ?? 'realdebrid';
+    const provider = config?.debridProvider ?? 'torbox';
     const baseUrl = this.config.baseUrl;
 
     return `<!DOCTYPE html>
@@ -359,8 +359,8 @@ export class ConfigController {
       <div class="form-group">
         <label for="provider">PROVEDOR DEBRID</label>
         <select id="provider">
-          <option value="realdebrid" ${provider === 'realdebrid' ? 'selected' : ''}>Real-Debrid</option>
           <option value="torbox" ${provider === 'torbox' ? 'selected' : ''}>TorBox</option>
+          <option value="realdebrid" ${provider === 'realdebrid' ? 'selected' : ''}>Real-Debrid</option>
         </select>
         <div class="helper">Servico que vai resolver os magnets em links diretos.</div>
       </div>
