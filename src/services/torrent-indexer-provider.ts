@@ -47,6 +47,10 @@ interface IndexedTorrentFile {
   originalIndex: number;
 }
 
+type IndexerQueryProfile = {
+  supportsImdbQuery: boolean;
+};
+
 interface SearchCacheEntry {
   ts: number;
   data: TorrentLike[];
@@ -66,6 +70,15 @@ const parseBoolean = (value: string | undefined, fallback: boolean): boolean => 
 };
 
 const MAX_STREAMS = 60;
+const MAX_TEXT_QUERIES = 12;
+const INDEXER_QUERY_PROFILES: Record<string, IndexerQueryProfile> = {
+  'comando_torrents': { supportsImdbQuery: false },
+  bludv: { supportsImdbQuery: false },
+  'torrent-dos-filmes': { supportsImdbQuery: false },
+  rede_torrent: { supportsImdbQuery: false },
+  vaca_torrent: { supportsImdbQuery: false },
+  'starck-filmes': { supportsImdbQuery: false },
+};
 const EPISODIC_HINT_REGEX =
   /(S[0-9]{1,3}(E[0-9]{1,3})?|S[0-9]{1,3}[._ -]?(19|20)[0-9]{2}|[0-9]+[xÃ—][0-9]+|temporadas?|season|seasons|temp\.?\s*\d|epis[oÃ³]dios?|epis[oÃ³]dio|episode|episodes|serie|sÃ©rie|sÃ©ries|series|minissÃ©rie|mini[\s-]?s[eÃ©]rie|ep\.?\s*[0-9]+|cap[iÃ­]tulo|capitulo|cap\.?\s*[0-9]+|completa|completo|complete|collection|cole[Ã§c][aÃ£]o|box\s*set|pack|integral|[0-9]+[ÂªÂºa]\s*temp)/i;
 
@@ -319,6 +332,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
     const imdbQuery = parsed.imdbId;
     const textQuery = this.buildTextQuery(type, parsed, targetTitle, releaseYear, episodeTitle);
+    const textQueries = this.buildTextQueryCandidates(type, parsed, displayTitles, releaseYear, episodeTitle);
 
     const queries: string[] = [];
     if (imdbQuery) {
@@ -337,6 +351,11 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     }
     if (textQuery && !queries.includes(textQuery)) {
       queries.push(textQuery);
+    }
+    for (const q of textQueries) {
+      if (!queries.includes(q)) {
+        queries.push(q);
+      }
     }
 
     if (queries.length === 0) {
@@ -663,6 +682,13 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     query: string,
     limit: number,
   ): Promise<TorrentLike[]> {
+    const normalizedIndexer = indexerName.trim().toLowerCase();
+    const profile = INDEXER_QUERY_PROFILES[normalizedIndexer];
+    const isImdbQuery = /^tt\d+$/i.test(query.trim());
+    if (isImdbQuery && profile && !profile.supportsImdbQuery) {
+      return [];
+    }
+
     const url = new URL(`${this.baseUrl}/indexers/${encodeURIComponent(indexerName)}`);
     url.searchParams.set('q', query);
     url.searchParams.set('limit', String(limit));
@@ -787,6 +813,73 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     }
 
     return targetTitle;
+  }
+
+  private buildTextQueryCandidates(
+    type: string,
+    parsed: ParsedIdInfo,
+    targetTitles: string[],
+    releaseYear?: number,
+    episodeTitle?: string,
+  ): string[] {
+    const out: string[] = [];
+    const add = (value?: string) => {
+      if (!value) {
+        return;
+      }
+      const cleaned = this.sanitizeQuery(value);
+      if (!cleaned) {
+        return;
+      }
+      if (!out.includes(cleaned)) {
+        out.push(cleaned);
+      }
+    };
+
+    if (parsed.query) {
+      add(parsed.query);
+    }
+
+    const seenTitles = Array.from(new Set(targetTitles.map((t) => this.sanitizeQuery(t)).filter(Boolean) as string[]));
+    const limitedTitles = seenTitles.slice(0, 6);
+
+    for (const title of limitedTitles) {
+      if (type.toLowerCase() === 'movie') {
+        add(title);
+        if (releaseYear) {
+          add(`${title} ${releaseYear}`);
+        }
+        continue;
+      }
+
+      // Series: mix PT-BR wording and SxxEyy notation for better source coverage.
+      if (parsed.season !== undefined) {
+        const s = parsed.season;
+        const sPad = String(s).padStart(2, '0');
+        add(`${title} temporada ${s}`);
+        add(`${title} season ${s}`);
+        add(`${title} S${sPad}`);
+
+        if (parsed.episode !== undefined) {
+          const e = parsed.episode;
+          const ePad = String(e).padStart(2, '0');
+          add(`${title} temporada ${s} episodio ${e}`);
+          add(`${title} season ${s} episode ${e}`);
+          add(`${title} S${sPad}E${ePad}`);
+          add(`${title} ${s}x${ePad}`);
+        }
+      }
+
+      if (episodeTitle) {
+        add(`${title} ${episodeTitle}`);
+      }
+      if (releaseYear) {
+        add(`${title} ${releaseYear}`);
+      }
+      add(title);
+    }
+
+    return out.slice(0, MAX_TEXT_QUERIES);
   }
 
   private isRelevantTorrent(torrent: TorrentLike, context: MatchContext): boolean {
