@@ -1,5 +1,15 @@
 /**
  * Real-Debrid Service
+ *
+ * Handles magnet → direct-link resolution via the Real-Debrid API.
+ * Includes comprehensive file selection with language-aware, BR-optimised
+ * episode matching that supports:
+ *   - Standard SxxExx notation
+ *   - NxNN / N×NN (multiplication sign U+00D7)
+ *   - Bare-number filenames ("2 - Sick.mp4")
+ *   - Portuguese keywords (episódio, capítulo, temporada)
+ *   - Concatenated season+episode (302 = S03E02)
+ *   - Junk / ad file rejection (samples, promos, .nfo, .url, tiny files)
  */
 
 import { request } from 'undici';
@@ -14,28 +24,105 @@ interface InstantAvailabilityCacheEntry {
   expires: number;
 }
 
+// ── Constants ────────────────────────────────────────────────────────────────
+const API_BASE = 'https://api.real-debrid.com/rest/1.0';
+const REQUEST_TIMEOUT_MS = 15_000;
+const MIN_VIDEO_BYTES = 5 * 1024 * 1024; // 5 MB – anything smaller is junk
+
+// Video extensions accepted as playable media
+const VIDEO_EXTENSIONS =
+  /\.(mp4|mkv|mov|avi|ts|m4v|m2ts|wmv|flv|webm|divx|xvid|vob|iso|3gp|ogv|rmvb)$/i;
+
+// Junk / non-playable extensions
+const JUNK_EXTENSIONS =
+  /\.(txt|url|nfo|jpg|jpeg|png|gif|bmp|ico|md|html?|exe|bat|lnk|srt|sub|ass|ssa|idx|sup|mka|rar|zip|7z|pdf|doc|docx|db|torrent)$/i;
+
+// Patterns that flag a file as sample / promo / ad
+const JUNK_CONTENT_REGEX =
+  /\b(sample|trailer|extras?|bonus|featurette|behind.?the.?scenes|credits?|creditos|poster|rarbg|nfo|subs?|propaganda|anuncio|promo|preview|teaser|1xbet|banner|ad[s_]|screener|watermark)\b/i;
+
 export class RealDebridService {
   private static readonly INSTANT_AVAILABILITY_TTL_MS = 5 * 60 * 1000; // 5 minutes
   private static instantAvailabilityCache = new Map<string, InstantAvailabilityCacheEntry>();
 
   constructor(private token: string) {}
 
+  // ── Public API ──────────────────────────────────────────────────────────
+
   async addMagnet(magnet: string): Promise<MagnetResponse> {
-    const response = await request('https://api.real-debrid.com/rest/1.0/torrents/addMagnet', {
+    const response = await request(`${API_BASE}/torrents/addMagnet`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${this.token}`,
         'Content-Type': 'application/x-www-form-urlencoded'
       },
-      body: new URLSearchParams({ magnet }).toString()
+      body: new URLSearchParams({ magnet }).toString(),
+      headersTimeout: REQUEST_TIMEOUT_MS,
+      bodyTimeout: REQUEST_TIMEOUT_MS
     });
 
     if (response.statusCode >= 400) {
-      throw new Error(`Failed to add magnet: ${response.statusCode}`);
+      const body = await response.body.text().catch(() => '');
+      throw new Error(`Failed to add magnet: ${response.statusCode} ${body}`);
     }
 
     return await response.body.json() as MagnetResponse;
   }
+
+  async selectFiles(torrentId: string, fileIds: string): Promise<void> {
+    const response = await request(`${API_BASE}/torrents/selectFiles/${torrentId}`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${this.token}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({ files: fileIds }).toString(),
+      headersTimeout: REQUEST_TIMEOUT_MS,
+      bodyTimeout: REQUEST_TIMEOUT_MS
+    });
+
+    if (response.statusCode >= 400) {
+      const body = await response.body.text().catch(() => '');
+      throw new Error(`Failed to select files: ${response.statusCode} ${body}`);
+    }
+  }
+
+  async getTorrentInfo(torrentId: string): Promise<TorrentInfo> {
+    const response = await request(`${API_BASE}/torrents/info/${torrentId}`, {
+      headers: { 'Authorization': `Bearer ${this.token}` },
+      headersTimeout: REQUEST_TIMEOUT_MS,
+      bodyTimeout: REQUEST_TIMEOUT_MS
+    });
+
+    if (response.statusCode >= 400) {
+      const body = await response.body.text().catch(() => '');
+      throw new Error(`Failed to get torrent info: ${response.statusCode} ${body}`);
+    }
+
+    return await response.body.json() as TorrentInfo;
+  }
+
+  async unrestrictLink(link: string): Promise<UnrestrictResponse> {
+    const response = await request(`${API_BASE}/unrestrict/link`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${this.token}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({ link }).toString(),
+      headersTimeout: REQUEST_TIMEOUT_MS,
+      bodyTimeout: REQUEST_TIMEOUT_MS
+    });
+
+    if (response.statusCode >= 400) {
+      const body = await response.body.text().catch(() => '');
+      throw new Error(`Failed to unrestrict link: ${response.statusCode} ${body}`);
+    }
+
+    return await response.body.json() as UnrestrictResponse;
+  }
+
+  // ── Instant Availability (cache check) ──────────────────────────────────
 
   static async fetchCachedInfoHashes(
     hashes: string[],
@@ -75,13 +162,13 @@ export class RealDebridService {
       const chunk = hashesToFetch.slice(i, i + chunkSize);
       const upperChunk = chunk.map((hash) => hash.toUpperCase());
       let chunkPayload = await this.fetchInstantAvailabilityPayload(
-        `https://api.real-debrid.com/rest/1.0/torrents/instantAvailability/${upperChunk.join('/')}`,
+        `${API_BASE}/torrents/instantAvailability/${upperChunk.join('/')}`,
         headers
       );
 
       if (!chunkPayload || this.isPayloadEmpty(chunkPayload)) {
         chunkPayload = await this.fetchInstantAvailabilityPayload(
-          `https://api.real-debrid.com/rest/1.0/torrents/instantAvailability/${upperChunk.join(',')}`,
+          `${API_BASE}/torrents/instantAvailability/${upperChunk.join(',')}`,
           headers
         );
       }
@@ -110,7 +197,7 @@ export class RealDebridService {
   ): Promise<void> {
     for (const hash of hashes) {
       const payload = await this.fetchInstantAvailabilityPayload(
-        `https://api.real-debrid.com/rest/1.0/torrents/instantAvailability/${hash.toUpperCase()}`,
+        `${API_BASE}/torrents/instantAvailability/${hash.toUpperCase()}`,
         headers
       );
 
@@ -131,7 +218,11 @@ export class RealDebridService {
     headers: Record<string, string>
   ): Promise<InstantAvailabilityRecord | undefined> {
     try {
-      const response = await request(endpoint, { headers });
+      const response = await request(endpoint, {
+        headers,
+        headersTimeout: REQUEST_TIMEOUT_MS,
+        bodyTimeout: REQUEST_TIMEOUT_MS
+      });
       if (response.statusCode >= 400) {
         await response.body.dump();
         return undefined;
@@ -212,86 +303,40 @@ export class RealDebridService {
     }
   }
 
-  async selectFiles(torrentId: string, fileIds: string): Promise<void> {
-    const response = await request(`https://api.real-debrid.com/rest/1.0/torrents/selectFiles/${torrentId}`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.token}`,
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      body: new URLSearchParams({ files: fileIds }).toString()
-    });
-
-    if (response.statusCode >= 400) {
-      throw new Error(`Failed to select files: ${response.statusCode}`);
-    }
-  }
-
-  async getTorrentInfo(torrentId: string): Promise<TorrentInfo> {
-    const response = await request(`https://api.real-debrid.com/rest/1.0/torrents/info/${torrentId}`, {
-      headers: {
-        'Authorization': `Bearer ${this.token}`
-      }
-    });
-
-    if (response.statusCode >= 400) {
-      throw new Error(`Failed to get torrent info: ${response.statusCode}`);
-    }
-
-    return await response.body.json() as TorrentInfo;
-  }
-
-  async unrestrictLink(link: string): Promise<UnrestrictResponse> {
-    const response = await request('https://api.real-debrid.com/rest/1.0/unrestrict/link', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.token}`,
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      body: new URLSearchParams({ link }).toString()
-    });
-
-    if (response.statusCode >= 400) {
-      throw new Error(`Failed to unrestrict link: ${response.statusCode}`);
-    }
-
-    return await response.body.json() as UnrestrictResponse;
-  }
+  // ── Magnet → Direct URL ─────────────────────────────────────────────────
 
   async processMagnetToDirectUrl(magnet: string, context?: StreamContext): Promise<string> {
-    // Add magnet
     const { id: torrentId } = await this.addMagnet(magnet);
-    
-    // Get torrent info
+
     const torrentInfo = await this.getTorrentInfo(torrentId);
-    
+
     if (!torrentInfo.files || torrentInfo.files.length === 0) {
       throw new Error(`No files found in torrent: ${torrentId}`);
     }
-    
-     const selectedFile = this.selectBestFile(torrentInfo.files, context);
+
+    const selectedFile = this.selectBestFile(torrentInfo.files, context);
     if (!selectedFile) {
       throw new Error('No playable files found in torrent');
     }
-    
-    // Select file
+
+    console.debug(`[RD] selected file id=${selectedFile.id} path=${selectedFile.path} bytes=${selectedFile.bytes}`);
+
+    // Select file in RD
     await this.selectFiles(torrentId, String(selectedFile.id));
-    
+
     // Check if already downloaded
     const currentInfo = await this.getTorrentInfo(torrentId);
     if (currentInfo.status === 'downloaded') {
       return await this.getDirectDownloadUrl(torrentId);
     }
-    
-    // Not downloaded yet, wait a bit and check again
-    // This gives Real-Debrid a chance to process the torrent
-    await new Promise(resolve => setTimeout(resolve, 5000)); // Wait 5 seconds
-    
+
+    // Not downloaded yet, wait and retry
+    await new Promise(resolve => setTimeout(resolve, 5000));
+
     const retryInfo = await this.getTorrentInfo(torrentId);
     if (retryInfo.status === 'downloaded') {
       return await this.getDirectDownloadUrl(torrentId);
     }
-    
 
     // Still not ready, return placeholder video URL
     return this.createPlaceholderUrl(torrentId);
@@ -299,16 +344,16 @@ export class RealDebridService {
 
   private async getDirectDownloadUrl(torrentId: string): Promise<string> {
     const finalInfo = await this.getTorrentInfo(torrentId);
-    
+
     if (!finalInfo.links || finalInfo.links.length === 0) {
       throw new Error(`No download links available for torrent: ${torrentId}`);
     }
-    
+
     const downloadLink = finalInfo.links[0];
     if (!downloadLink) {
       throw new Error(`Download link is undefined for torrent: ${torrentId}`);
     }
-    
+
     const { download } = await this.unrestrictLink(downloadLink);
     return download;
   }
@@ -318,21 +363,28 @@ export class RealDebridService {
     return `${config.baseUrl}/placeholder/downloading.mp4`;
   }
 
+  // ── File Selection Engine ───────────────────────────────────────────────
+
   private selectBestFile(
     files: NonNullable<TorrentInfo['files']>,
     context?: StreamContext
   ): NonNullable<TorrentInfo['files']>[number] | undefined {
     const videoFiles = files.filter((file) => this.isVideoFile(file.path));
     if (videoFiles.length === 0) {
+      // Fallback: try all files
       return files[0];
     }
 
+    // Try contextual match first
     const contextualMatch = this.findContextualMatch(videoFiles, context);
     if (contextualMatch) {
       return contextualMatch;
     }
 
-    return videoFiles.reduce((max, file) => (file.bytes > max.bytes ? file : max));
+    // Fallback: largest video file (excluding junk)
+    const cleanFiles = videoFiles.filter((f) => !this.isJunkFile(f.path, f.bytes));
+    const pool = cleanFiles.length > 0 ? cleanFiles : videoFiles;
+    return pool.reduce((max, file) => (file.bytes > max.bytes ? file : max));
   }
 
   private findContextualMatch(
@@ -356,21 +408,31 @@ export class RealDebridService {
     return scored[0]?.file;
   }
 
+  // ── Scoring ─────────────────────────────────────────────────────────────
+
   private scoreFileAgainstContext(
     file: { path: string; bytes: number },
     context: StreamContext
   ): number {
-    const normalizedPath = this.normalize(file.path);
+    const rawPath = file.path;
+    const normalizedPath = this.normalize(rawPath);
     if (!normalizedPath) {
       return 0;
     }
 
     let score = 0;
 
+    // ── Junk penalty ──────────────────────────────────────────────────
+    if (this.isJunkFile(rawPath, file.bytes)) {
+      score -= 50;
+    }
+
+    // ── Year match ────────────────────────────────────────────────────
     if (context.year && normalizedPath.includes(String(context.year))) {
       score += 4;
     }
 
+    // ── Title match ───────────────────────────────────────────────────
     if (context.title) {
       const normalizedTitle = this.normalize(context.title);
       if (normalizedTitle && normalizedPath.includes(normalizedTitle)) {
@@ -378,17 +440,27 @@ export class RealDebridService {
       }
     }
 
+    // ── Episode title match (strongest signal) ────────────────────────
     if (context.episodeTitle) {
       const normalizedEpisodeTitle = this.normalize(context.episodeTitle);
       if (normalizedEpisodeTitle && normalizedPath.includes(normalizedEpisodeTitle)) {
-        score += 8;
+        score += 14;
       }
     }
 
+    // ── Episode matching (using both raw and normalized paths) ─────────
     if (context.episode !== undefined) {
-      score += this.scoreEpisodeMatch(normalizedPath, context);
+      score += this.scoreEpisodeMatch(rawPath, normalizedPath, context);
     }
 
+    // ── Movie penalty for episodic files ──────────────────────────────
+    if (context.type === 'movie') {
+      if (/\bS\d{1,3}E\d{1,3}\b|\b\d{1,2}[x\u00d7]\d{1,3}\b/i.test(rawPath)) {
+        score -= 20;
+      }
+    }
+
+    // Size tiebreaker (logarithmic so it doesn't overpower content matches)
     if (score > 0) {
       score += Math.log10(file.bytes + 1);
     }
@@ -396,73 +468,148 @@ export class RealDebridService {
     return score;
   }
 
-  private scoreEpisodeMatch(path: string, context: StreamContext): number {
+  /**
+   * Comprehensive episode matching across all known filename patterns.
+   * Receives BOTH the raw path (for × and special chars) and the normalized
+   * path (for alphanumeric token matching).
+   */
+  private scoreEpisodeMatch(rawPath: string, normalizedPath: string, context: StreamContext): number {
     if (context.episode === undefined) {
       return 0;
     }
 
     const episode = context.episode;
-    const episodePadded = String(episode).padStart(2, '0');
+    const ep = String(episode);
+    const ep2 = ep.padStart(2, '0');
+    const ep3 = ep.padStart(3, '0');
     const season = context.season;
 
-    const tokens: string[] = [];
-    tokens.push(`e${episode}`);
-    tokens.push(`ep${episode}`);
-    tokens.push(`episode${episode}`);
-    tokens.push(`episodio${episode}`);
-    tokens.push(`capitulo${episode}`);
-    tokens.push(`part${episode}`);
+    let matchScore = 0;
 
-    tokens.push(`e${episodePadded}`);
-    tokens.push(`ep${episodePadded}`);
-    tokens.push(`episode${episodePadded}`);
-    tokens.push(`episodio${episodePadded}`);
+    // ────────────────────────────────────────────────────────────────────
+    // 1) Normalized-path token matching (handles most standard patterns)
+    // ────────────────────────────────────────────────────────────────────
+    const normalizedTokens: string[] = [
+      // E02, EP02, Episode02, Episodio02, Capitulo02
+      `e${ep}`, `e${ep2}`,
+      `ep${ep}`, `ep${ep2}`,
+      `episode${ep}`, `episode${ep2}`,
+      `episodio${ep}`, `episodio${ep2}`,
+      `capitulo${ep}`, `capitulo${ep2}`,
+      `folge${ep}`, `folge${ep2}`,
+      `part${ep}`, `part${ep2}`,
+      `parte${ep}`, `parte${ep2}`,
+      `cap${ep}`, `cap${ep2}`,
+    ];
 
     if (season !== undefined) {
-      const seasonPadded = String(season).padStart(2, '0');
-      tokens.push(`s${season}e${episode}`);
-      tokens.push(`s${season}e${episodePadded}`);
-      tokens.push(`s${seasonPadded}e${episodePadded}`);
-      tokens.push(`s${seasonPadded}e${episode}`);
-      tokens.push(`season${season}episode${episode}`);
-      tokens.push(`season${seasonPadded}episode${episodePadded}`);
-      tokens.push(`${season}x${episode}`);
-      tokens.push(`${season}x${episodePadded}`);
-      tokens.push(`${seasonPadded}x${episodePadded}`);
-      // BR concatenated: normalize() strips × so 3×02 → 302
-      tokens.push(`${season}${episodePadded}`);
-      tokens.push(`${seasonPadded}${episodePadded}`);
+      const s = String(season);
+      const s2 = s.padStart(2, '0');
+      normalizedTokens.push(
+        // S03E02, S3E2
+        `s${s}e${ep}`, `s${s}e${ep2}`,
+        `s${s2}e${ep}`, `s${s2}e${ep2}`,
+        // Season3Episode2
+        `season${s}episode${ep}`, `season${s2}episode${ep2}`,
+        `temporada${s}episodio${ep}`, `temporada${s2}episodio${ep2}`,
+        // NxNN: 3x02 (normalized, x is kept as alphanumeric)
+        `${s}x${ep}`, `${s}x${ep2}`,
+        `${s2}x${ep}`, `${s2}x${ep2}`,
+        // Concatenated: normalize() strips × so 3×02 → "302"
+        `${s}${ep2}`, `${s2}${ep2}`,
+      );
     }
 
-    const normalizedTokens = tokens.map((token) => this.normalize(token)).filter(Boolean) as string[];
-
-    let matchScore = 0;
-    for (const token of normalizedTokens) {
-      if (path.includes(token)) {
-        matchScore += token.length >= 4 ? 10 : 6;
+    // Normalize all tokens the same way as the path
+    const processedTokens = normalizedTokens.map((t) => this.normalize(t)).filter(Boolean);
+    for (const token of processedTokens) {
+      if (normalizedPath.includes(token)) {
+        matchScore += token.length >= 5 ? 12 : token.length >= 3 ? 8 : 5;
       }
     }
 
-    // Match bare episode number at start of filename path segments.
-    // Files like "2 - Sick.mp4" or "02 - Sick.mp4" normalize to "2sickmp4" or "02sickmp4".
-    // Check if the path STARTS with the episode number followed by non-digit chars.
-    const bareEpRegex = new RegExp(`^0*${episode}(?![0-9])`);
-    // Also check after path separators (the normalize strips / but raw path might have been split)
-    if (bareEpRegex.test(path)) {
+    // ────────────────────────────────────────────────────────────────────
+    // 2) Raw-path regex matching (for ×, accented chars, special notation)
+    // ────────────────────────────────────────────────────────────────────
+    const rawLower = rawPath.toLowerCase();
+
+    // 2a) N×NN pattern: 3×02, 03×02 (× = U+00D7 multiplication sign)
+    if (season !== undefined) {
+      const s = String(season);
+      const s2 = s.padStart(2, '0');
+      const crossPatterns = [
+        `${s}\u00d7${ep}`, `${s}\u00d7${ep2}`,
+        `${s2}\u00d7${ep}`, `${s2}\u00d7${ep2}`,
+      ];
+      for (const cp of crossPatterns) {
+        if (rawLower.includes(cp)) {
+          matchScore += 14; // High confidence — very specific match
+        }
+      }
+    }
+
+    // 2b) Bare number at start of filename: "2 - Sick.mp4", "02.Title.mkv"
+    //     Match number at start of string or after path separator
+    const bareEpRegex = new RegExp(`(?:^|[/\\\\])0*${episode}\\s*[-._\\s]+[a-z]`, 'i');
+    if (bareEpRegex.test(rawPath)) {
       matchScore += 12;
     }
-    // Check the raw (un-normalized) path for × pattern: 3×02
-    // This is tested on the ORIGINAL path before normalization strips ×
 
-    if (context.episodeList && context.episodeList.includes(context.episode)) {
+    // 2c) Bare number followed directly by extension: "02.mp4"
+    const bareExtRegex = new RegExp(`(?:^|[/\\\\])0*${episode}\\.(mkv|mp4|avi|m4v|ts)$`, 'i');
+    if (bareExtRegex.test(rawPath)) {
+      matchScore += 10;
+    }
+
+    // 2d) Portuguese ordinal: "Episódio 2", "Capítulo 02"
+    const ptRegex = new RegExp(`(?:epis[oó]dio|cap[ií]tulo|cap\\.?)\\s*0*${episode}\\b`, 'i');
+    if (ptRegex.test(rawPath)) {
+      matchScore += 12;
+    }
+
+    // 2e) Hash notation: #02
+    if (rawLower.includes(`#${ep2}`) || rawLower.includes(`#${ep}`)) {
+      matchScore += 8;
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 3) Wrong-episode penalty: if another episode is strongly matched,
+    //    penalize to avoid false positives from concatenated tokens
+    // ────────────────────────────────────────────────────────────────────
+    if (season !== undefined && matchScore > 0) {
+      const s2 = String(season).padStart(2, '0');
+      // Check if a DIFFERENT episode marker is present (SxxEYY where YY ≠ target)
+      const otherEpMatch = rawLower.match(/s\d{1,3}e(\d{1,3})/i) ||
+        rawLower.match(/\d{1,2}[x\u00d7](\d{1,3})/i);
+      if (otherEpMatch) {
+        const detectedEp = parseInt(otherEpMatch[1] ?? '', 10);
+        if (!isNaN(detectedEp) && detectedEp !== episode) {
+          matchScore -= 20; // Strong penalty for wrong episode
+        }
+      }
+    }
+
+    // ────────────────────────────────────────────────────────────────────
+    // 4) Episode list bonus
+    // ────────────────────────────────────────────────────────────────────
+    if (context.episodeList && context.episodeList.includes(episode)) {
       matchScore += 2;
     }
 
     return matchScore;
   }
 
+  // ── Utility Methods ─────────────────────────────────────────────────────
+
   private isVideoFile(path: string): boolean {
-    return /\.(mp4|mkv|mov|avi|ts|m4v|wmv|flv|webm)$/i.test(path);
+    return VIDEO_EXTENSIONS.test(path);
+  }
+
+  private isJunkFile(path: string, bytes: number): boolean {
+    if (JUNK_EXTENSIONS.test(path)) return true;
+    if (JUNK_CONTENT_REGEX.test(path)) return true;
+    if (bytes > 0 && bytes < MIN_VIDEO_BYTES) return true;
+    return false;
   }
 
   private normalize(value: string | undefined): string {
@@ -476,5 +623,4 @@ export class RealDebridService {
       .replace(/[^a-z0-9]+/gi, '')
       .toLowerCase();
   }
-
 }
