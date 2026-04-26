@@ -365,13 +365,13 @@ export class ConfigController {
         <div class="helper">Servico que vai resolver os magnets em links diretos.</div>
       </div>
 
-      <div class="form-group" id="rdGroup">
+      <div class="form-group" id="rdGroup" style="display:${provider === 'torbox' ? 'none' : 'block'}">
         <label for="rdToken">TOKEN REAL-DEBRID</label>
         <input type="text" id="rdToken" placeholder="Cole seu token aqui" value="${config?.realdebridToken || ''}">
         <div class="helper"><a href="https://real-debrid.com/apitoken" target="_blank" style="color:var(--accent)">Obter token &rarr;</a></div>
       </div>
 
-      <div class="form-group" id="tbGroup">
+      <div class="form-group" id="tbGroup" style="display:${provider === 'torbox' ? 'block' : 'none'}">
         <label for="tbToken">TOKEN TORBOX</label>
         <input type="text" id="tbToken" placeholder="Cole seu token aqui" value="${config?.torboxToken || ''}">
         <div class="helper"><a href="https://torbox.app/settings" target="_blank" style="color:var(--accent)">Obter token &rarr;</a></div>
@@ -422,6 +422,7 @@ export class ConfigController {
               <a id="installWebLink" class="modal-btn" href="#" target="_blank" rel="noopener noreferrer">Instalar no Stremio Web</a>
             </div>
             <div id="modalUrl" class="modal-url"></div>
+            <div id="modalHint" class="helper"></div>
           </div>
 
           <div class="modal-panel">
@@ -449,6 +450,7 @@ export class ConfigController {
       var modalUrlEl = document.getElementById('modalUrl');
       var installWebLink = document.getElementById('installWebLink');
       var installQr = document.getElementById('installQr');
+      var modalHint = document.getElementById('modalHint');
       var openInStremioBtn = document.getElementById('openInStremioBtn');
       var copyFromModalBtn = document.getElementById('copyFromModalBtn');
 
@@ -491,20 +493,30 @@ export class ConfigController {
       }
 
       function updateInstallState() {
-        var url = buildUrl();
-        installBtn.disabled = !url;
+        // Botao principal sempre abre o modal; validacao acontece nas acoes internas.
+        installBtn.disabled = false;
       }
 
       function openModal() {
         var url = buildUrl();
-        if (!url) {
-          alert('Preencha o token do provedor selecionado antes de instalar.');
-          return;
+        if (url) {
+          modalUrlEl.textContent = url;
+          installWebLink.href = 'https://web.stremio.com/#/addons?addon=' + encodeURIComponent(url);
+          installWebLink.style.pointerEvents = 'auto';
+          installWebLink.style.opacity = '1';
+          installQr.style.display = 'block';
+          installQr.src = 'https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=' + encodeURIComponent(url);
+          modalHint.textContent = '';
+        } else {
+          var tokenLabel = provEl.value === 'torbox' ? 'TorBox' : 'Real-Debrid';
+          modalUrlEl.textContent = 'Preencha o token de ' + tokenLabel + ' para gerar o link de instalacao.';
+          installWebLink.href = '#';
+          installWebLink.style.pointerEvents = 'none';
+          installWebLink.style.opacity = '0.55';
+          installQr.style.display = 'none';
+          installQr.removeAttribute('src');
+          modalHint.textContent = 'Defina o token e clique novamente em "Abrir no Stremio" ou "Copiar URL de instalacao".';
         }
-
-        modalUrlEl.textContent = url;
-        installWebLink.href = 'https://web.stremio.com/#/addons?addon=' + encodeURIComponent(url);
-        installQr.src = 'https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=' + encodeURIComponent(url);
 
         installModal.classList.add('show');
         installModal.setAttribute('aria-hidden', 'false');
