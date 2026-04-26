@@ -15,6 +15,8 @@ export interface AddonManifest {
   version: string;
   name: string;
   description: string;
+  logo?: string;
+  background?: string;
   catalogs: any[];
   resources: string[];
   types: string[];

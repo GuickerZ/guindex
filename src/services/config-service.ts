@@ -1,6 +1,6 @@
 /**
  * Configuration Service
- * Carrega variáveis de ambiente e monta a configuração do addon.
+ * Carrega variaveis de ambiente e monta a configuracao do addon.
  */
 
 import type { AppConfig } from '../models/config-model.js';
@@ -10,7 +10,7 @@ export class ConfigService {
     const port = Number(process.env.PORT || 7000);
     const logLevel = (process.env.LOG_LEVEL as AppConfig['logLevel']) || 'info';
 
-    // BASE_URL é obrigatória em produção. Em dev, usa localhost.
+    // BASE_URL obrigatoria em producao. Em dev, usa localhost.
     const normalizedBaseUrl =
       ConfigService.normalizeBaseUrl(process.env.BASE_URL) ||
       ConfigService.normalizeBaseUrl(`http://localhost:${port}`)!;
@@ -37,14 +37,10 @@ export class ConfigService {
   }
 
   private static normalizeBaseUrl(value?: string | null): string | undefined {
-    if (!value) {
-      return undefined;
-    }
+    if (!value) return undefined;
 
     let candidate = value.trim();
-    if (!candidate) {
-      return undefined;
-    }
+    if (!candidate) return undefined;
 
     if (!/^https?:\/\//i.test(candidate)) {
       candidate = `https://${candidate}`;
@@ -58,7 +54,7 @@ export class ConfigService {
       parsed.hash = '';
       return parsed.toString().replace(/\/+$/, '');
     } catch (error) {
-      console.warn(`URL base inválida (${value}):`, error);
+      console.warn(`[GuIndex] URL base invalida (${value}):`, error);
       return undefined;
     }
   }

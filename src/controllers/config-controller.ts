@@ -1,6 +1,6 @@
 /**
  * Config Controller
- * Gera o manifest Stremio e a pÃ¡gina de configuraÃ§Ã£o do addon.
+ * Gera o manifest Stremio e a pagina de configuracao do addon.
  */
 
 import type { AddonManifest } from '../models/config-model.js';
@@ -15,11 +15,14 @@ export class ConfigController {
       version: '1.1.0',
       name: 'GuIndex',
       description:
-        'Addon brasileiro para Stremio â€” busca torrents nacionais via torrent-indexer e resolve via Real-Debrid ou TorBox.',
+        'Addon brasileiro para Stremio. Busca torrents nacionais via torrent-indexer e resolve via Real-Debrid ou TorBox.',
       catalogs: [],
       resources: ['stream'],
       types: ['movie', 'series'],
       idPrefixes: ['tt'],
+      // TODO: Apos subir o logo no GitHub, atualize as URLs abaixo:
+      // logo: 'https://raw.githubusercontent.com/GuickerZ/guindex/main/public/logo.png',
+      // background: 'https://raw.githubusercontent.com/GuickerZ/guindex/main/public/background.png',
       behaviorHints: {
         adult: false,
         p2p: false,
@@ -31,7 +34,7 @@ export class ConfigController {
           key: 'debridProvider',
           type: 'select',
           title: 'Provedor Debrid',
-          description: 'Escolha qual provedor premium serÃ¡ usado para reproduÃ§Ã£o.',
+          description: 'Escolha qual provedor premium sera usado para reproducao.',
           options: [
             { value: 'realdebrid', label: 'Real-Debrid' },
             { value: 'torbox', label: 'TorBox' }
@@ -58,7 +61,7 @@ export class ConfigController {
     config?: { realdebridToken?: string; torboxToken?: string; debridProvider?: string },
     isConfigured: boolean = false
   ): string {
-    const buttonText = isConfigured ? 'Salvar ConfiguraÃ§Ã£o' : 'Instalar Addon';
+    const buttonText = isConfigured ? 'Salvar' : 'Instalar Addon';
     const provider = config?.debridProvider ?? 'realdebrid';
     const baseUrl = this.config.baseUrl;
 
@@ -67,273 +70,211 @@ export class ConfigController {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>GuIndex â€” ConfiguraÃ§Ã£o</title>
+  <title>GuIndex - Addon Stremio BR</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg: #0a0a0f;
-      --surface: #13131a;
-      --surface-hover: #1a1a24;
-      --border: #2a2a3a;
-      --accent: #22c55e;
-      --accent-hover: #16a34a;
-      --accent-glow: rgba(34, 197, 94, 0.15);
+      --bg: #08080d;
+      --surface: #111118;
+      --surface-2: #191920;
+      --border: #25252f;
+      --accent: #10b981;
+      --accent-hover: #059669;
+      --accent-glow: rgba(16, 185, 129, 0.12);
+      --accent-2: #6366f1;
       --text: #e4e4e7;
       --text-dim: #71717a;
+      --text-xdim: #52525b;
       --danger: #ef4444;
-      --info-bg: rgba(34, 197, 94, 0.08);
-      --info-border: rgba(34, 197, 94, 0.2);
     }
-
     * { margin: 0; padding: 0; box-sizing: border-box; }
-
     body {
       font-family: 'Inter', -apple-system, sans-serif;
       background: var(--bg);
       color: var(--text);
       min-height: 100vh;
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
       padding: 20px;
       background-image:
-        radial-gradient(ellipse at 20% 50%, rgba(34, 197, 94, 0.04) 0%, transparent 50%),
-        radial-gradient(ellipse at 80% 50%, rgba(99, 102, 241, 0.03) 0%, transparent 50%);
+        radial-gradient(ellipse at 30% 20%, rgba(16, 185, 129, 0.06) 0%, transparent 50%),
+        radial-gradient(ellipse at 70% 80%, rgba(99, 102, 241, 0.04) 0%, transparent 50%);
     }
-
     .card {
-      width: 100%;
-      max-width: 480px;
+      width: 100%; max-width: 460px;
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 16px;
       padding: 32px;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
     }
-
-    .header {
-      text-align: center;
-      margin-bottom: 28px;
-    }
-
-    .logo {
-      font-size: 28px;
-      font-weight: 700;
-      letter-spacing: -0.5px;
-      margin-bottom: 4px;
-    }
-
+    .header { text-align: center; margin-bottom: 24px; }
+    .logo { font-size: 32px; font-weight: 800; letter-spacing: -1px; }
     .logo span { color: var(--accent); }
-
-    .subtitle {
-      font-size: 13px;
-      color: var(--text-dim);
-      line-height: 1.5;
+    .badge {
+      display: inline-block;
+      background: var(--accent-glow);
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 20px;
+      margin-top: 6px;
+      border: 1px solid rgba(16,185,129,0.15);
     }
-
+    .subtitle { font-size: 13px; color: var(--text-dim); margin-top: 8px; line-height: 1.5; }
     .info-box {
-      background: var(--info-bg);
-      border: 1px solid var(--info-border);
+      background: rgba(16,185,129,0.06);
+      border: 1px solid rgba(16,185,129,0.15);
       border-radius: 10px;
-      padding: 14px 16px;
-      margin-bottom: 24px;
-      font-size: 13px;
+      padding: 12px 14px;
+      margin-bottom: 20px;
+      font-size: 12px;
       line-height: 1.6;
       color: var(--text-dim);
     }
-
-    .info-box strong { color: var(--accent); }
-    .info-box a { color: var(--accent); text-decoration: none; }
+    .info-box a { color: var(--accent); text-decoration: none; font-weight: 600; }
     .info-box a:hover { text-decoration: underline; }
-
-    .form-group {
-      margin-bottom: 18px;
-    }
-
-    label {
-      display: block;
-      font-size: 13px;
-      font-weight: 600;
-      margin-bottom: 6px;
-      color: var(--text);
-    }
-
-    .helper {
-      font-size: 12px;
-      color: var(--text-dim);
-      margin-top: 4px;
-    }
-
+    .form-group { margin-bottom: 16px; }
+    label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px; color: var(--text); letter-spacing: 0.3px; }
+    .helper { font-size: 11px; color: var(--text-xdim); margin-top: 3px; }
     select, input[type="text"] {
-      width: 100%;
-      padding: 10px 14px;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      color: var(--text);
-      font-size: 14px;
-      font-family: inherit;
+      width: 100%; padding: 10px 12px;
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 8px; color: var(--text);
+      font-size: 13px; font-family: inherit;
       transition: border-color 0.2s, box-shadow 0.2s;
       outline: none;
     }
-
-    select:focus, input[type="text"]:focus {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px var(--accent-glow);
-    }
-
-    input::placeholder { color: var(--text-dim); }
-
+    select:focus, input[type="text"]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+    input::placeholder { color: var(--text-xdim); }
     .btn {
-      width: 100%;
-      padding: 12px;
-      background: var(--accent);
-      color: #000;
-      border: none;
-      border-radius: 8px;
-      font-size: 15px;
-      font-weight: 600;
-      font-family: inherit;
-      cursor: pointer;
+      width: 100%; padding: 11px;
+      background: var(--accent); color: #000;
+      border: none; border-radius: 8px;
+      font-size: 14px; font-weight: 700;
+      font-family: inherit; cursor: pointer;
       transition: background 0.2s, transform 0.1s;
-      margin-top: 6px;
+      margin-top: 4px; letter-spacing: 0.3px;
     }
-
     .btn:hover { background: var(--accent-hover); }
     .btn:active { transform: scale(0.98); }
-
-    .links {
-      margin-top: 20px;
-      text-align: center;
-      font-size: 12px;
-      color: var(--text-dim);
-      line-height: 1.8;
-    }
-
-    .links a {
-      color: var(--accent);
-      text-decoration: none;
-      font-weight: 500;
-    }
-
+    .links { margin-top: 16px; text-align: center; font-size: 11px; color: var(--text-xdim); line-height: 2; }
+    .links a { color: var(--accent); text-decoration: none; font-weight: 500; }
     .links a:hover { text-decoration: underline; }
-
+    .divider { height: 1px; background: var(--border); margin: 18px 0; }
     .aio-box {
-      margin-top: 20px;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 14px 16px;
-      font-size: 12px;
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 10px; padding: 12px 14px; font-size: 11px;
     }
-
-    .aio-box strong {
-      display: block;
-      margin-bottom: 6px;
-      font-size: 13px;
-      color: var(--text);
-    }
-
+    .aio-box strong { display: block; margin-bottom: 4px; font-size: 12px; color: var(--text); }
     .aio-box code {
-      display: block;
-      background: var(--surface-hover);
-      padding: 8px 10px;
-      border-radius: 6px;
-      font-size: 11px;
-      word-break: break-all;
-      color: var(--accent);
-      margin-top: 6px;
-      cursor: pointer;
-      transition: background 0.2s;
+      display: block; background: var(--surface-2);
+      padding: 8px 10px; border-radius: 6px;
+      font-size: 10px; word-break: break-all;
+      color: var(--accent); margin-top: 5px;
+      cursor: pointer; transition: background 0.2s;
+      border: 1px solid var(--border);
     }
-
-    .aio-box code:hover {
-      background: var(--border);
+    .aio-box code:hover { background: var(--border); }
+    .footer {
+      margin-top: 20px; text-align: center;
+      font-size: 10px; color: var(--text-xdim); line-height: 1.8;
     }
-
+    .footer a { color: var(--accent-2); text-decoration: none; }
+    .footer a:hover { text-decoration: underline; }
+    .star-btn {
+      display: inline-flex; align-items: center; gap: 4px;
+      background: var(--surface-2); color: var(--text-dim);
+      border: 1px solid var(--border);
+      padding: 4px 10px; border-radius: 6px;
+      font-size: 11px; font-weight: 500; text-decoration: none;
+      transition: border-color 0.2s, color 0.2s;
+      margin: 2px;
+    }
+    .star-btn:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
     .toast {
-      position: fixed;
-      bottom: 24px;
-      left: 50%;
-      transform: translateX(-50%) translateY(100px);
-      background: var(--accent);
-      color: #000;
-      padding: 10px 20px;
-      border-radius: 8px;
-      font-size: 13px;
-      font-weight: 600;
-      opacity: 0;
-      transition: transform 0.3s, opacity 0.3s;
+      position: fixed; bottom: 24px; left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: var(--accent); color: #000;
+      padding: 10px 20px; border-radius: 8px;
+      font-size: 13px; font-weight: 600;
+      opacity: 0; transition: transform 0.3s, opacity 0.3s;
       z-index: 999;
     }
-
-    .toast.show {
-      transform: translateX(-50%) translateY(0);
-      opacity: 1;
-    }
-
-    .divider {
-      height: 1px;
-      background: var(--border);
-      margin: 20px 0;
-    }
+    .toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
   </style>
 </head>
 <body>
   <div class="card">
     <div class="header">
-      <div class="logo">ðŸ‡§ðŸ‡· <span>GuIndex</span></div>
+      <div class="logo">Gu<span>Index</span></div>
+      <div class="badge">v1.1.0 &bull; Open Source</div>
       <div class="subtitle">
-        Addon Stremio para conteÃºdo brasileiro<br>
-        Torrents nacionais via Real-Debrid ou TorBox
+        Addon Stremio para torrents brasileiros<br>
+        via Real-Debrid ou TorBox
       </div>
     </div>
 
     <div class="info-box">
-      Powered by <a href="https://github.com/felipemarinho97/torrent-indexer" target="_blank"><strong>torrent-indexer</strong></a>
-      â€” indexador open source de sites de torrents brasileiros.
+      &#9889; Powered by <a href="https://github.com/felipemarinho97/torrent-indexer" target="_blank">torrent-indexer</a>
+      &mdash; indexador open source de sites de torrents BR por
+      <a href="https://github.com/felipemarinho97" target="_blank">@felipemarinho97</a>.
+      <br>&#11088; <a href="https://github.com/felipemarinho97/torrent-indexer" target="_blank">De uma estrela no projeto dele!</a>
     </div>
 
     <form id="configForm">
       <div class="form-group">
-        <label for="provider">Provedor Debrid</label>
+        <label for="provider">PROVEDOR DEBRID</label>
         <select id="provider">
           <option value="realdebrid" ${provider === 'realdebrid' ? 'selected' : ''}>Real-Debrid</option>
           <option value="torbox" ${provider === 'torbox' ? 'selected' : ''}>TorBox</option>
         </select>
-        <div class="helper">ServiÃ§o que vai resolver os magnets em links diretos.</div>
+        <div class="helper">Servico que vai resolver os magnets em links diretos.</div>
       </div>
 
       <div class="form-group" id="rdGroup">
-        <label for="rdToken">Token API Real-Debrid</label>
+        <label for="rdToken">TOKEN REAL-DEBRID</label>
         <input type="text" id="rdToken" placeholder="Cole seu token aqui" value="${config?.realdebridToken || ''}">
+        <div class="helper"><a href="https://real-debrid.com/apitoken" target="_blank" style="color:var(--accent)">Obter token &rarr;</a></div>
       </div>
 
       <div class="form-group" id="tbGroup">
-        <label for="tbToken">Token API TorBox</label>
+        <label for="tbToken">TOKEN TORBOX</label>
         <input type="text" id="tbToken" placeholder="Cole seu token aqui" value="${config?.torboxToken || ''}">
+        <div class="helper"><a href="https://torbox.app/settings" target="_blank" style="color:var(--accent)">Obter token &rarr;</a></div>
       </div>
 
       <button type="submit" class="btn">${buttonText}</button>
     </form>
 
-    <div class="links">
-      <a href="https://real-debrid.com/apitoken" target="_blank">Obter token Real-Debrid â†’</a><br>
-      <a href="https://torbox.app/settings" target="_blank">Obter token TorBox â†’</a>
+    <div class="divider"></div>
+
+    <div class="aio-box">
+      <strong>&#128225; URL para AIOStreams</strong>
+      <div class="helper">Clique para copiar. Substitua TOKEN pelo seu token real.</div>
+      <code id="aioUrl" onclick="copyAio()">${baseUrl}/manifest.json?debridProvider=torbox&amp;torboxToken=TOKEN</code>
     </div>
 
     <div class="divider"></div>
 
-    <div class="aio-box">
-      <strong>ðŸ“¡ URL para AIOStreams</strong>
-      <div class="helper">Clique para copiar. Substitua TOKEN pelo seu token.</div>
-      <code id="aioUrl" onclick="copyAio()">${baseUrl}/manifest.json?debridProvider=torbox&torboxToken=TOKEN</code>
+    <div style="text-align:center">
+      <a class="star-btn" href="https://github.com/GuickerZ/guindex" target="_blank">&#11088; Dar estrela no GuIndex</a>
+      <a class="star-btn" href="https://github.com/felipemarinho97/torrent-indexer" target="_blank">&#11088; Dar estrela no torrent-indexer</a>
+    </div>
+
+    <div class="footer">
+      Feito por <a href="https://github.com/GuickerZ" target="_blank">@GuickerZ</a>
+      &bull; <a href="https://github.com/GuickerZ/guindex" target="_blank">Codigo fonte</a>
+      &bull; <a href="https://github.com/GuickerZ/guindex/issues" target="_blank">Reportar bug</a>
     </div>
   </div>
 
-  <div class="toast" id="toast">Copiado! âœ“</div>
+  <div class="toast" id="toast"></div>
 
   <script>
     (function() {
@@ -342,57 +283,55 @@ export class ConfigController {
       var rdGroup = document.getElementById('rdGroup');
       var tbGroup = document.getElementById('tbGroup');
 
-      function toggleFields() {
-        var isTb = provEl.value === 'torbox';
-        rdGroup.style.display = isTb ? 'none' : 'block';
-        tbGroup.style.display = isTb ? 'block' : 'none';
-        updateAioUrl();
+      function toggle() {
+        var tb = provEl.value === 'torbox';
+        rdGroup.style.display = tb ? 'none' : 'block';
+        tbGroup.style.display = tb ? 'block' : 'none';
+        updateAio();
       }
 
-      function updateAioUrl() {
+      function updateAio() {
         var p = provEl.value;
-        var key = p === 'torbox' ? 'torboxToken' : 'realdebridToken';
+        var k = p === 'torbox' ? 'torboxToken' : 'realdebridToken';
         document.getElementById('aioUrl').textContent =
-          baseUrl + '/manifest.json?debridProvider=' + p + '&' + key + '=TOKEN';
+          baseUrl + '/manifest.json?debridProvider=' + p + '&' + k + '=TOKEN';
       }
 
-      provEl.addEventListener('change', toggleFields);
-      toggleFields();
+      provEl.addEventListener('change', toggle);
+      toggle();
 
       document.getElementById('configForm').addEventListener('submit', function(e) {
         e.preventDefault();
-        var provider = provEl.value;
-        var rdToken = document.getElementById('rdToken').value.trim();
-        var tbToken = document.getElementById('tbToken').value.trim();
-        var token = provider === 'torbox' ? tbToken : rdToken;
+        var prov = provEl.value;
+        var rd = document.getElementById('rdToken').value.trim();
+        var tb = document.getElementById('tbToken').value.trim();
+        var token = prov === 'torbox' ? tb : rd;
         if (!token) { alert('Preencha o token do provedor selecionado.'); return; }
 
         var params = new URLSearchParams();
-        params.set('debridProvider', provider);
-        if (rdToken) params.set('realdebridToken', rdToken);
-        if (tbToken) params.set('torboxToken', tbToken);
-        var installUrl = baseUrl + '/manifest.json?' + params.toString();
+        params.set('debridProvider', prov);
+        if (rd) params.set('realdebridToken', rd);
+        if (tb) params.set('torboxToken', tb);
+        var url = baseUrl + '/manifest.json?' + params.toString();
 
-        navigator.clipboard.writeText(installUrl).then(function() {
+        navigator.clipboard.writeText(url).then(function() {
           showToast('URL copiada! Cole no Stremio para instalar.');
         }).catch(function() {
-          prompt('Copie esta URL e cole no Stremio:', installUrl);
+          prompt('Copie esta URL e cole no Stremio:', url);
         });
       });
     })();
 
     function copyAio() {
-      var text = document.getElementById('aioUrl').textContent;
-      navigator.clipboard.writeText(text).then(function() {
-        showToast('URL AIOStreams copiada!');
-      });
+      var t = document.getElementById('aioUrl').textContent;
+      navigator.clipboard.writeText(t).then(function() { showToast('URL copiada!'); });
     }
 
     function showToast(msg) {
-      var t = document.getElementById('toast');
-      t.textContent = msg;
-      t.classList.add('show');
-      setTimeout(function() { t.classList.remove('show'); }, 2500);
+      var el = document.getElementById('toast');
+      el.textContent = msg;
+      el.classList.add('show');
+      setTimeout(function() { el.classList.remove('show'); }, 2500);
     }
   </script>
 </body>

@@ -1,137 +1,152 @@
-# 🇧🇷 GuIndex
+<p align="center">
+  <strong>GuIndex</strong><br>
+  <em>Addon Stremio para conteudo brasileiro via Real-Debrid / TorBox</em>
+</p>
 
-**Addon Stremio para conteúdo brasileiro** — transforma resultados do [torrent-indexer](https://github.com/felipemarinho97/torrent-indexer) em streams diretos via Real-Debrid ou TorBox.
+<p align="center">
+  <a href="https://github.com/GuickerZ/guindex/stargazers"><img src="https://img.shields.io/github/stars/GuickerZ/guindex?style=for-the-badge&color=10b981&labelColor=111118" alt="Stars"></a>
+  <a href="https://github.com/GuickerZ/guindex/issues"><img src="https://img.shields.io/github/issues/GuickerZ/guindex?style=for-the-badge&color=6366f1&labelColor=111118" alt="Issues"></a>
+  <a href="https://github.com/GuickerZ/guindex/blob/main/LICENSE"><img src="https://img.shields.io/github/license/GuickerZ/guindex?style=for-the-badge&color=10b981&labelColor=111118" alt="License"></a>
+</p>
 
-> Este projeto é open source e foi criado por necessidade pessoal. Atualizarei enquanto eu tiver necessidade no meu próprio uso, mas peço ajuda da comunidade para contribuir e melhorar o projeto.
+<p align="center">
+  <a href="https://guindex-stremio.vercel.app">Instancia Publica</a> &bull;
+  <a href="#instalacao">Instalacao</a> &bull;
+  <a href="#torrent-indexer">Torrent Indexer</a> &bull;
+  <a href="https://github.com/GuickerZ/guindex/issues">Reportar Bug</a>
+</p>
 
 ---
 
-## 📋 O que é?
+## O que e?
 
-O **GuIndex** é um addon para o [Stremio](https://www.stremio.com/) que funciona como uma ponte entre o indexador de torrents brasileiros ([torrent-indexer](https://github.com/felipemarinho97/torrent-indexer)) e serviços de debrid (Real-Debrid / TorBox).
+O **GuIndex** e um addon para o [Stremio](https://www.stremio.com/) que funciona como uma ponte entre o indexador de torrents brasileiros e servicos de debrid (Real-Debrid / TorBox).
+
+Diferente de outras solucoes que exigem Prowlarr, Jackett ou configuracoes complexas, o GuIndex funciona direto: instala no Stremio e assiste.
+
+```
+Stremio -> GuIndex -> torrent-indexer -> sites brasileiros de torrent
+                  |
+            Real-Debrid / TorBox -> Stream direto (sem P2P)
+```
 
 ### Como funciona
 
-```
-Stremio → GuIndex → torrent-indexer → sites brasileiros de torrent
-                 ↓
-           Real-Debrid / TorBox → Stream direto (sem P2P)
-```
-
-1. O Stremio pede streams para um filme/série
-2. O GuIndex consulta o [torrent-indexer](https://github.com/felipemarinho97/torrent-indexer) que indexa sites brasileiros de torrents
-3. Os resultados são processados com matching inteligente de temporada/episódio
-4. Os magnets são resolvidos pelo seu serviço de debrid (RD ou TB) em links diretos
-5. Você assiste com qualidade e sem depender de seeders
+1. O Stremio pede streams para um filme ou serie
+2. O GuIndex consulta o [torrent-indexer](https://github.com/felipemarinho97/torrent-indexer) que indexa sites brasileiros
+3. Os resultados sao processados com matching inteligente de temporada/episodio
+4. Os magnets sao resolvidos pelo seu debrid (RD ou TB) em links diretos
+5. Voce assiste com qualidade, sem depender de seeders, sem P2P
 
 ### Funcionalidades
 
-- 🎬 **Filmes e Séries** — suporte completo a ambos os tipos
-- 🇧🇷 **Otimizado para BR** — regex específico para padrões de releases brasileiros (×, Temporada, Dublado, etc.)
-- ⚡ **Real-Debrid + TorBox** — suporte a ambos os provedores de debrid
-- 📦 **Season Packs** — seleção inteligente do episódio correto dentro de packs
-- 🧹 **Filtro de lixo** — remove automaticamente amostras, propagandas, arquivos pequenos
-- 🔌 **Addons externos** — permite agregar streams de outros addons Stremio que não suportam debrid
-- 🐳 **Docker** — pronto para self-host via Docker
-- 📡 **AIOStreams** — compatível com o engine [AIOStreams](https://github.com/Viren070/AIOStreams)
+- **Filmes e Series** - suporte completo a ambos os tipos
+- **Otimizado para BR** - regex especifico para padroes de releases brasileiros
+- **Real-Debrid + TorBox** - suporte a ambos os provedores
+- **Season Packs** - selecao inteligente do episodio correto dentro de packs
+- **Filtro de lixo** - remove amostras, propagandas, arquivos pequenos automaticamente
+- **Addons externos** - agrega streams de outros addons que nao suportam debrid
+- **AIOStreams** - compativel com [AIOStreams](https://github.com/Viren070/AIOStreams)
+- **Docker** - pronto para self-host
 
 ---
 
-## 🚀 Instalação
+## Torrent Indexer
 
-### Opção 1: Usar instância pública
+> **Creditos importantes**: Este projeto depende inteiramente do [torrent-indexer](https://github.com/felipemarinho97/torrent-indexer), um projeto open source criado por [@felipemarinho97](https://github.com/felipemarinho97). Ele indexa os principais sites brasileiros de torrents e inclusive hospeda a instancia publica que o GuIndex usa por padrao. Sem o trabalho dele, este addon nao existiria.
 
-Se alguém estiver hospedando uma instância pública, basta acessar a URL de configuração no navegador e seguir as instruções.
+<p align="center">
+  <a href="https://github.com/felipemarinho97/torrent-indexer"><img src="https://img.shields.io/github/stars/felipemarinho97/torrent-indexer?style=for-the-badge&color=f59e0b&labelColor=111118&label=torrent-indexer%20stars" alt="torrent-indexer stars"></a>
+</p>
 
-### Opção 2: Self-host com Docker (recomendado)
+**Recomendamos fortemente que voce faca self-host do torrent-indexer** para maior controle, menor latencia e para nao sobrecarregar a instancia publica:
+
+```bash
+# Docker
+docker run -p 8080:8080 ghcr.io/felipemarinho97/torrent-indexer:latest
+
+# Configure no GuIndex:
+TORRENT_INDEXER_URL=http://localhost:8080
+```
+
+A instancia publica `https://torrent-indexer.darklyn.org` pode ficar indisponivel. Self-host garante estabilidade.
+
+Consulte o [README do torrent-indexer](https://github.com/felipemarinho97/torrent-indexer) para mais detalhes sobre os sites suportados e como configurar.
+
+---
+
+## Instalacao
+
+### Opcao 1: Instancia publica
+
+Acesse **[guindex-stremio.vercel.app](https://guindex-stremio.vercel.app)**, configure seu token e instale no Stremio.
+
+### Opcao 2: Docker (recomendado para self-host)
 
 ```bash
 git clone https://github.com/GuickerZ/guindex.git
 cd guindex
 cp .env.example .env
-# Edite .env com sua BASE_URL
+# Edite .env: defina BASE_URL com seu dominio
 docker compose up -d
 ```
 
-### Opção 3: Self-host manual (Node.js)
+### Opcao 3: Node.js manual
 
 ```bash
 git clone https://github.com/GuickerZ/guindex.git
 cd guindex
 npm install
 cp .env.example .env
-# Edite .env com sua BASE_URL
+# Edite .env: defina BASE_URL
 npm run build
 npm start
 ```
 
-### Opção 4: Deploy na nuvem
+### Opcao 4: Cloud
 
-O projeto inclui configs prontos para:
+| Plataforma | Arquivo | Deploy |
+|-----------|---------|--------|
+| **Vercel** | `vercel.json` | Fork + import no Vercel |
+| **Render** | `render.yaml` | Fork + new Web Service |
+| **Docker** | `Dockerfile` | Qualquer host com Docker |
 
-| Plataforma | Arquivo |
-|-----------|---------|
-| **Vercel** | `vercel.json` |
-| **Render** | `render.yaml` |
-| **Docker** | `Dockerfile` + `docker-compose.yml` |
-
-> ⚠️ **Importante:** Defina a variável `BASE_URL` com o domínio público da sua instância.
+> **Importante:** Em producao, defina `BASE_URL` com o dominio publico da sua instancia.
 
 ---
 
-## ⚙️ Configuração
+## Configuracao
 
-### Variáveis de Ambiente
+### Variaveis de Ambiente
 
-| Variável | Obrigatória | Descrição |
+| Variavel | Obrigatoria | Descricao |
 |----------|:-----------:|-----------|
-| `PORT` | Não | Porta do servidor (padrão: `7000`) |
-| `BASE_URL` | **Sim** (prod) | URL pública da sua instância |
-| `LOG_LEVEL` | Não | Nível de log: `debug`, `info`, `warn`, `error` |
-| `TORRENT_INDEXER_URL` | Não | URL do torrent-indexer (padrão: `https://torrent-indexer.darklyn.org`) |
-| `REALDEBRID_TOKEN` | Não | Token fixo do Real-Debrid (alternativa à query string) |
-| `TORBOX_TOKEN` | Não | Token fixo do TorBox (alternativa à query string) |
-| `TORBOX_WAIT_VIDEO_URL` | Não | URL do vídeo de espera enquanto o TorBox processa |
-| `TORBOX_STREAM_LIMIT` | Não | Limite de streams do TorBox (padrão: `15`) |
+| `PORT` | Nao | Porta do servidor (padrao: `7000`) |
+| `BASE_URL` | **Sim** (prod) | URL publica da sua instancia |
+| `LOG_LEVEL` | Nao | `debug`, `info`, `warn`, `error` |
+| `TORRENT_INDEXER_URL` | Nao | URL do torrent-indexer (padrao: instancia publica) |
+| `TORBOX_WAIT_VIDEO_URL` | Nao | Video de espera enquanto TorBox processa |
+| `TORBOX_STREAM_LIMIT` | Nao | Limite de streams TorBox (padrao: `15`) |
 
-### Instalação no Stremio
+### Uso com Stremio
 
-Após o deploy, acesse a raiz da sua instância (`https://seu-dominio.com/`) e siga as instruções na página de configuração.
+Acesse a pagina de configuracao da sua instancia e siga as instrucoes. A URL do manifest segue o formato:
 
-A URL do manifest segue o formato:
 ```
 https://seu-dominio.com/manifest.json?debridProvider=torbox&torboxToken=SEU_TOKEN
 ```
 
 ### Uso com AIOStreams
 
-O GuIndex é compatível com o [AIOStreams](https://github.com/Viren070/AIOStreams). Adicione como addon customizado usando a URL do manifest acima.
+O GuIndex e compativel com o [AIOStreams](https://github.com/Viren070/AIOStreams). Adicione como addon customizado usando a URL do manifest.
 
-Um exemplo de configuração AIOStreams está disponível em `aiostreams-config-exemplo.json` — este é um template pessoal, adapte ao seu uso.
-
----
-
-## 🔧 Torrent Indexer
-
-Este projeto depende do **[torrent-indexer](https://github.com/felipemarinho97/torrent-indexer)**, um projeto open source de [@felipemarinho97](https://github.com/felipemarinho97) que indexa sites brasileiros de torrents.
-
-**Recomendamos fortemente que você faça self-host do torrent-indexer** para maior controle e menor latência:
-
-```bash
-# Docker
-docker run -p 8080:8080 ghcr.io/felipemarinho97/torrent-indexer:latest
-
-# Depois configure no GuIndex:
-TORRENT_INDEXER_URL=http://localhost:8080
-```
-
-A instância pública `https://torrent-indexer.darklyn.org` pode ficar indisponível ou lenta. Self-host garante estabilidade.
+O arquivo `aiostreams-config-exemplo.json` contem uma configuracao de referencia praticamente pronta para usuarios brasileiros do Stremio com TorBox. Inclui addons BR populares, formatacao customizada com emojis, filtros de qualidade e ordenacao otimizada. Adapte os tokens e use como ponto de partida.
 
 ---
 
-## 🔌 Addons Externos
+## Addons Externos
 
-O GuIndex também pode agregar streams de **outros addons Stremio** que não possuem suporte nativo a Real-Debrid ou TorBox. Configure na lista de sources em `src/config/sources.ts`:
+O GuIndex tambem agrega streams de **outros addons Stremio** que nao possuem suporte nativo a debrid. Configure em `src/config/sources.ts`:
 
 ```typescript
 export const SOURCES: BaseSourceProvider[] = [
@@ -141,82 +156,98 @@ export const SOURCES: BaseSourceProvider[] = [
 ];
 ```
 
-Isso permite que magnets de qualquer addon sejam resolvidos via debrid.
+Magnets de qualquer addon passam pelo seu debrid automaticamente.
 
 ---
 
-## 🏗️ Stack Técnica
+## Stack Tecnica
 
 | Tecnologia | Uso |
 |-----------|-----|
 | **TypeScript** | Linguagem principal |
 | **Fastify** | Servidor HTTP |
 | **Node.js 18+** | Runtime |
-| **Undici** | Cliente HTTP para APIs de debrid |
+| **Undici** | Cliente HTTP para APIs debrid |
 | **Pino** | Logger estruturado |
-| **Zod** | Validação de schemas |
-| **Docker** | Containerização |
+| **Zod** | Validacao de schemas |
+| **Docker** | Containerizacao |
 
 ### Estrutura do Projeto
 
 ```
 src/
-├── server.ts                    # Ponto de entrada
+├── server.ts                       # Ponto de entrada
 ├── config/
-│   └── sources.ts               # Fontes de streams configuradas
+│   └── sources.ts                  # Fontes de streams
 ├── controllers/
-│   ├── config-controller.ts     # Manifest + página de configuração
-│   └── stream-controller.ts     # Lógica de streams + resolução debrid
-├── models/
-│   ├── config-model.ts          # Tipos de configuração
-│   ├── debrid-model.ts          # Tipos debrid
-│   ├── realdebrid-model.ts      # Tipos Real-Debrid
-│   ├── source-model.ts          # Tipos de stream/source
-│   └── stream-model.ts          # Tipos de resposta Stremio
+│   ├── config-controller.ts        # Manifest + pagina de config
+│   └── stream-controller.ts        # Streams + resolucao debrid
+├── models/                         # Tipos TypeScript
 ├── routes/
-│   └── routes.ts                # Rotas HTTP
+│   └── routes.ts                   # Rotas HTTP
 └── services/
-    ├── base-source-provider.ts  # Interface base para providers
-    ├── config-service.ts        # Carregamento de config
-    ├── realdebrid-service.ts    # Real-Debrid API + file selection
-    ├── source-service.ts        # Orquestrador de sources
-    ├── stream-service.ts        # Processamento e formatação de streams
-    ├── stremio-addon-provider.ts# Provider para addons Stremio externos
-    ├── torbox-client.ts         # Cliente TorBox API
-    ├── torbox-service.ts        # TorBox resolve + file selection
-    └── torrent-indexer-provider.ts  # Provider principal (torrent-indexer)
+    ├── realdebrid-service.ts       # Real-Debrid API + file selection
+    ├── torbox-service.ts           # TorBox API + file selection
+    ├── torbox-client.ts            # Cliente TorBox
+    ├── torrent-indexer-provider.ts  # Provider principal
+    ├── stremio-addon-provider.ts    # Provider para addons externos
+    ├── stream-service.ts           # Processamento de streams
+    ├── source-service.ts           # Orquestrador
+    ├── config-service.ts           # Config
+    └── base-source-provider.ts     # Interface base
 ```
 
 ---
 
-## 🤝 Contribuindo
+## Contribuindo
 
-Contribuições são muito bem-vindas! Este projeto foi feito por uma pessoa e precisa da comunidade.
+Este projeto foi feito por uma pessoa e precisa da comunidade. Contribuicoes sao muito bem-vindas!
 
-1. Faça fork do repositório
+1. Fork o repositorio
 2. Crie uma branch: `git checkout -b minha-melhoria`
-3. Faça commit: `git commit -m 'Melhoria X'`
+3. Commit: `git commit -m 'Melhoria X'`
 4. Push: `git push origin minha-melhoria`
 5. Abra um Pull Request
 
-### Ideias para contribuições
+### Ideias
 
-- Adicionar mais padrões de nomes de releases brasileiros
-- Suporte a mais provedores de debrid (AllDebrid, Premiumize, etc.)
+- Mais padroes de nomes de releases BR
+- Suporte a AllDebrid, Premiumize, etc.
 - Testes automatizados
-- Catálogos
-- Interface web de administração
+- Catalogos nativos
+- Interface de admin
 
 ---
 
-## 📄 Licença
+## Apoie o Projeto
 
-MIT — use como quiser.
+Se o GuIndex te ajuda, considere:
+
+- **Dar uma estrela** neste repositorio e no [torrent-indexer](https://github.com/felipemarinho97/torrent-indexer)
+- **Reportar bugs** e sugerir melhorias nas [issues](https://github.com/GuickerZ/guindex/issues)
+- **Contribuir com codigo** via Pull Requests
+- **Compartilhar** com outros usuarios brasileiros do Stremio
+- **Self-hospedar** o torrent-indexer para aliviar a carga da instancia publica
+
+<p align="center">
+  <a href="https://github.com/GuickerZ/guindex/stargazers"><img src="https://img.shields.io/github/stars/GuickerZ/guindex?style=for-the-badge&color=10b981&labelColor=111118&label=GuIndex" alt="Star GuIndex"></a>
+  <a href="https://github.com/felipemarinho97/torrent-indexer/stargazers"><img src="https://img.shields.io/github/stars/felipemarinho97/torrent-indexer?style=for-the-badge&color=f59e0b&labelColor=111118&label=torrent-indexer" alt="Star torrent-indexer"></a>
+</p>
 
 ---
 
-## 🙏 Agradecimentos
+## Agradecimentos
 
-- [@felipemarinho97](https://github.com/felipemarinho97) pelo [torrent-indexer](https://github.com/felipemarinho97/torrent-indexer)
-- [AIOStreams](https://github.com/Viren070/AIOStreams) pela engine de aggregação
-- Comunidade Stremio
+- [@felipemarinho97](https://github.com/felipemarinho97) pelo [torrent-indexer](https://github.com/felipemarinho97/torrent-indexer) - a base de tudo
+- [AIOStreams](https://github.com/Viren070/AIOStreams) pela engine de agregacao
+- Comunidade Stremio brasileira
+
+---
+
+## Licenca
+
+MIT - use como quiser.
+
+<p align="center">
+  <sub>Feito por <a href="https://github.com/GuickerZ">@GuickerZ</a></sub>
+</p>

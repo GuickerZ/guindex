@@ -1,7 +1,7 @@
 {
   "name": "guindex",
   "version": "1.1.0",
-  "description": "Addon Stremio para conteúdo brasileiro — transforma resultados do torrent-indexer em streams diretos via Real-Debrid ou TorBox.",
+  "description": "Addon Stremio para conteudo brasileiro - transforma resultados do torrent-indexer em streams diretos via Real-Debrid ou TorBox.",
   "main": "dist/server.js",
   "scripts": {
     "dev": "nodemon --exec \"npx ts-node --project tsconfig.dev.json --esm src/server.ts\" --watch src --ext ts,js",
@@ -11,6 +11,7 @@
   },
   "keywords": [
     "stremio",
+    "stremio-addon",
     "addon",
     "torrent",
     "real-debrid",
@@ -19,13 +20,18 @@
     "guindex",
     "brasileiro",
     "torrent-indexer",
-    "streaming"
+    "streaming",
+    "brazil"
   ],
-  "author": "GuickerZ",
+  "author": "GuickerZ (https://github.com/GuickerZ)",
   "license": "MIT",
+  "homepage": "https://guindex-stremio.vercel.app",
   "repository": {
     "type": "git",
-    "url": "https://github.com/GuickerZ/guindex"
+    "url": "https://github.com/GuickerZ/guindex.git"
+  },
+  "bugs": {
+    "url": "https://github.com/GuickerZ/guindex/issues"
   },
   "type": "module",
   "engines": {
