@@ -317,12 +317,35 @@ export class ConfigController {
       border-color: transparent;
     }
     .modal-btn.primary:hover { background: var(--accent-hover); color: #000; }
+    .qr-shell {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px;
+      background:
+        linear-gradient(135deg, rgba(16, 185, 129, 0.08), rgba(99, 102, 241, 0.06)),
+        var(--surface-2);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+    }
     .qr {
       width: 100%;
-      border-radius: 8px;
-      border: 1px solid var(--border);
+      max-width: 170px;
+      aspect-ratio: 1 / 1;
+      margin: 0 auto;
+      border-radius: 10px;
+      border: 1px solid #d4d4d8;
       background: #fff;
       display: block;
+      object-fit: contain;
+      padding: 8px;
+    }
+    .qr-tag {
+      margin-top: 8px;
+      text-align: center;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.4px;
+      color: var(--text-dim);
+      text-transform: uppercase;
     }
     .hint-mini {
       margin-top: 8px;
@@ -428,7 +451,10 @@ export class ConfigController {
           <div class="modal-panel">
             <h3>Android rapido</h3>
             <p>Escaneie o QR code com o celular para abrir o link de instalacao.</p>
-            <img id="installQr" class="qr" alt="QR code de instalacao">
+            <div class="qr-shell">
+              <img id="installQr" class="qr" alt="QR code de instalacao">
+              <div class="qr-tag">GuIndex Install</div>
+            </div>
             <div class="hint-mini">No Android, pode aparecer confirmacao para abrir no app Stremio.</div>
           </div>
         </div>

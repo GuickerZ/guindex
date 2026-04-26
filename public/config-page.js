@@ -100,7 +100,7 @@
       els.installWebLink.style.pointerEvents = 'auto';
       els.installWebLink.style.opacity = '1';
       els.installQr.style.display = 'block';
-      els.installQr.src = 'https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=' + encodeURIComponent(url);
+      els.installQr.src = 'https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=' + encodeURIComponent(url);
       els.modalHint.textContent = '';
     } else {
       var tokenLabel = els.provEl.value === 'torbox' ? 'TorBox' : 'Real-Debrid';
