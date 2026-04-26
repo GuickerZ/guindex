@@ -248,9 +248,10 @@ export class ConfigController {
         <div class="helper"><a href="https://torbox.app/settings" target="_blank" style="color:var(--accent)">Obter token &rarr;</a></div>
       </div>
 
-      <div style="display: flex; gap: 10px; margin-top: 8px;">
-        <a id="installBtn" class="btn" href="#" style="text-align:center; text-decoration:none; display:flex; align-items:center; justify-content:center; box-sizing: border-box;">Instalar no Stremio</a>
-        <button type="button" id="copyBtn" class="btn" style="background: var(--surface-2); color: var(--text); border: 1px solid var(--border);">Copiar URL</button>
+      <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 12px;">
+        <a id="installBtn" class="btn" href="#" onclick="if(this.getAttribute('href')==='#'){alert('Preencha o token do provedor selecionado antes de instalar.');return false;}" style="text-align:center; text-decoration:none; display:flex; align-items:center; justify-content:center; box-sizing: border-box;">Instalar no App (Windows/Android)</a>
+        <a id="installWebBtn" class="btn" href="#" onclick="if(this.getAttribute('href')==='#'){alert('Preencha o token do provedor selecionado antes de instalar.');return false;}" style="text-align:center; text-decoration:none; display:flex; align-items:center; justify-content:center; box-sizing: border-box; background: var(--surface-2); color: var(--text); border: 1px solid var(--border);">Instalar no Stremio Web</a>
+        <button type="button" id="copyBtn" class="btn" style="background: var(--surface-2); color: var(--text); border: 1px solid var(--border);">Copiar URL (Outros dispositivos)</button>
       </div>
     </form>
 
@@ -319,10 +320,13 @@ export class ConfigController {
       function updateInstallLink() {
         var url = buildUrl();
         var installBtn = document.getElementById('installBtn');
+        var installWebBtn = document.getElementById('installWebBtn');
         if (url) {
           installBtn.href = url.replace(/^https?:\/\//i, 'stremio://');
+          installWebBtn.href = 'https://web.stremio.com/#/addons?addon=' + encodeURIComponent(url);
         } else {
           installBtn.href = '#';
+          installWebBtn.href = '#';
         }
       }
 
@@ -330,15 +334,6 @@ export class ConfigController {
       document.getElementById('rdToken').addEventListener('input', updateInstallLink);
       document.getElementById('tbToken').addEventListener('input', updateInstallLink);
       updateInstallLink();
-
-      document.getElementById('installBtn').addEventListener('click', function(e) {
-        if (this.getAttribute('href') === '#') {
-          e.preventDefault();
-          alert('Preencha o token do provedor selecionado antes de instalar.');
-          return;
-        }
-        setTimeout(function() { showToast('Tentando abrir o Stremio...'); }, 100);
-      });
 
       document.getElementById('copyBtn').addEventListener('click', function(e) {
         e.preventDefault();
