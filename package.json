@@ -1,17 +1,36 @@
 {
-  "name": "stremio-guindex-rd",
-  "version": "1.0.0",
-  "description": "Stremio addon that proxies torrent-indexer streams through Real-Debrid or Torbox into direct HTTP streams.",
-  "main": "index.js",
+  "name": "guindex",
+  "version": "1.1.0",
+  "description": "Addon Stremio para conteúdo brasileiro — transforma resultados do torrent-indexer em streams diretos via Real-Debrid ou TorBox.",
+  "main": "dist/server.js",
   "scripts": {
     "dev": "nodemon --exec \"npx ts-node --project tsconfig.dev.json --esm src/server.ts\" --watch src --ext ts,js",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "lint": "eslint src --ext .ts"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "stremio",
+    "addon",
+    "torrent",
+    "real-debrid",
+    "torbox",
+    "debrid",
+    "guindex",
+    "brasileiro",
+    "torrent-indexer",
+    "streaming"
+  ],
+  "author": "GuickerZ",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/GuickerZ/guindex"
+  },
   "type": "module",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {
     "@fastify/cors": "^8.5.0",
     "@fastify/static": "^6.12.0",

@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: guindex-rd
+    name: guindex
     env: docker
     dockerfilePath: ./Dockerfile
     dockerContext: .
@@ -14,4 +14,4 @@ services:
         value: info
       - key: NODE_ENV
         value: production
-    healthCheckPath: /manifest.json
+    healthCheckPath: /health

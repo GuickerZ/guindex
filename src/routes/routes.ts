@@ -320,16 +320,9 @@ export function setupRoutes() {
     reply.sendFile('downloading.mp4');
   });
 
-  fastify.get('/debug', async (_req, reply) => {
-    reply.send({
-      environment: {
-        PORT: process.env.PORT,
-        LOG_LEVEL: process.env.LOG_LEVEL,
-        BASE_URL: process.env.BASE_URL,
-        NODE_ENV: process.env.NODE_ENV
-      },
-      config: ConfigService.loadConfig()
-    });
+  // Health check para Docker/Render/Kubernetes
+  fastify.get('/health', async (_req, reply) => {
+    reply.send({ status: 'ok', timestamp: Date.now() });
   });
 
   return fastify;

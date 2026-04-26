@@ -1,0 +1,868 @@
+{
+    "services":  [
+                     {
+                         "id":  "realdebrid",
+                         "enabled":  false,
+                         "credentials":  {
+
+                                         }
+                     },
+                     {
+                         "id":  "alldebrid",
+                         "enabled":  false,
+                         "credentials":  {
+
+                                         }
+                     },
+                     {
+                         "id":  "premiumize",
+                         "enabled":  false,
+                         "credentials":  {
+
+                                         }
+                     },
+                     {
+                         "id":  "debridlink",
+                         "enabled":  false,
+                         "credentials":  {
+
+                                         }
+                     },
+                     {
+                         "id":  "torbox",
+                         "enabled":  true,
+                         "credentials":  {
+
+                                         }
+                     },
+                     {
+                         "id":  "offcloud",
+                         "enabled":  false,
+                         "credentials":  {
+
+                                         }
+                     },
+                     {
+                         "id":  "putio",
+                         "enabled":  false,
+                         "credentials":  {
+
+                                         }
+                     },
+                     {
+                         "id":  "easynews",
+                         "enabled":  false,
+                         "credentials":  {
+
+                                         }
+                     },
+                     {
+                         "id":  "easydebrid",
+                         "enabled":  false,
+                         "credentials":  {
+
+                                         }
+                     },
+                     {
+                         "id":  "debrider",
+                         "enabled":  false,
+                         "credentials":  {
+
+                                         }
+                     },
+                     {
+                         "id":  "pikpak",
+                         "enabled":  false,
+                         "credentials":  {
+
+                                         }
+                     },
+                     {
+                         "id":  "seedr",
+                         "enabled":  false,
+                         "credentials":  {
+
+                                         }
+                     },
+                     {
+                         "id":  "stremio_nntp",
+                         "enabled":  false,
+                         "credentials":  {
+
+                                         }
+                     },
+                     {
+                         "id":  "nzbdav",
+                         "enabled":  false,
+                         "credentials":  {
+
+                                         }
+                     },
+                     {
+                         "id":  "altmount",
+                         "enabled":  false,
+                         "credentials":  {
+
+                                         }
+                     },
+                     {
+                         "id":  "stremthru_newz",
+                         "enabled":  false,
+                         "credentials":  {
+
+                                         }
+                     }
+                 ],
+    "presets":  [
+                    {
+                        "type":  "custom",
+                        "instanceId":  "885",
+                        "enabled":  true,
+                        "options":  {
+                                        "name":  "CloutStream",
+                                        "manifestUrl":  "https://cloutstream.onrender.com/manifest.json",
+                                        "timeout":  7000,
+                                        "resources":  [
+
+                                                      ],
+                                        "mediaTypes":  [
+
+                                                       ],
+                                        "pinPosition":  "top",
+                                        "libraryAddon":  false,
+                                        "formatPassthrough":  false,
+                                        "resultPassthrough":  true
+                                    }
+                    },
+                    {
+                        "type":  "custom",
+                        "instanceId":  "b94",
+                        "enabled":  false,
+                        "options":  {
+                                        "name":  "FenixFlix",
+                                        "manifestUrl":  "https://fenixflix-2cdc.onrender.com/manifest.json",
+                                        "libraryAddon":  false,
+                                        "formatPassthrough":  false,
+                                        "resultPassthrough":  true,
+                                        "timeout":  15000,
+                                        "resources":  [
+                                                          "stream"
+                                                      ],
+                                        "pinPosition":  "top",
+                                        "mediaTypes":  [
+
+                                                       ]
+                                    }
+                    },
+                    {
+                        "type":  "custom",
+                        "instanceId":  "9b6",
+                        "enabled":  true,
+                        "options":  {
+                                        "name":  "Brazuca Torrents",
+                                        "manifestUrl":  "https://HASH_AQUI-brazuca-torrents.baby-beamup.club/torbox=SEU_TOKEN_AQUI/manifest.json",
+                                        "timeout":  10000,
+                                        "resources":  [
+
+                                                      ],
+                                        "mediaTypes":  [
+
+                                                       ],
+                                        "libraryAddon":  false,
+                                        "resultPassthrough":  false
+                                    }
+                    },
+                    {
+                        "type":  "custom",
+                        "instanceId":  "9a3",
+                        "enabled":  true,
+                        "options":  {
+                                        "name":  "GuIndex",
+                                        "manifestUrl":  "https://SEU_DOMINIO/manifest.json?debridProvider=torbox\u0026torboxToken=SEU_TOKEN_AQUI",
+                                        "libraryAddon":  false,
+                                        "formatPassthrough":  false,
+                                        "resultPassthrough":  false,
+                                        "forceToTop":  false,
+                                        "timeout":  10000,
+                                        "resources":  [
+                                                          "stream"
+                                                      ],
+                                        "mediaTypes":  [
+
+                                                       ]
+                                    }
+                    },
+                    {
+                        "type":  "custom",
+                        "instanceId":  "5fb",
+                        "enabled":  true,
+                        "options":  {
+                                        "name":  "MY CINE",
+                                        "manifestUrl":  "https://mycine.alwaysdata.net/manifest.json",
+                                        "libraryAddon":  false,
+                                        "resultPassthrough":  false,
+                                        "forceToTop":  false,
+                                        "timeout":  15000,
+                                        "resources":  [
+                                                          "stream"
+                                                      ]
+                                    }
+                    },
+                    {
+                        "type":  "custom",
+                        "instanceId":  "6d3",
+                        "enabled":  true,
+                        "options":  {
+                                        "name":  "CineTorrent",
+                                        "manifestUrl":  "https://150203dd784e-cinetorrent-addon.baby-beamup.club/manifest.json",
+                                        "timeout":  10000,
+                                        "resources":  [
+
+                                                      ],
+                                        "mediaTypes":  [
+
+                                                       ],
+                                        "pinPosition":  "top",
+                                        "libraryAddon":  false,
+                                        "resultPassthrough":  true
+                                    }
+                    },
+                    {
+                        "type":  "custom",
+                        "instanceId":  "b00",
+                        "enabled":  true,
+                        "options":  {
+                                        "name":  "MediaFusion",
+                                        "manifestUrl":  "https://mediafusion.elfhosted.com/SEU_CONFIG/manifest.json",
+                                        "libraryAddon":  false,
+                                        "resultPassthrough":  false,
+                                        "forceToTop":  false,
+                                        "timeout":  10000,
+                                        "resources":  [
+
+                                                      ],
+                                        "mediaTypes":  [
+
+                                                       ]
+                                    }
+                    },
+                    {
+                        "type":  "comet",
+                        "instanceId":  "250",
+                        "enabled":  true,
+                        "options":  {
+                                        "name":  "Comet",
+                                        "timeout":  10000,
+                                        "resources":  [
+                                                          "stream"
+                                                      ],
+                                        "includeP2P":  false,
+                                        "removeTrash":  true,
+                                        "services":  [
+                                                         "torbox"
+                                                     ],
+                                        "mediaTypes":  [
+
+                                                       ]
+                                    }
+                    },
+                    {
+                        "type":  "orion",
+                        "instanceId":  "67b",
+                        "enabled":  false,
+                        "options":  {
+                                        "name":  "Orion",
+                                        "timeout":  15000,
+                                        "resources":  [
+                                                          "stream"
+                                                      ],
+                                        "showP2P":  false,
+                                        "linkLimit":  10,
+                                        "services":  [
+                                                         "realdebrid"
+                                                     ],
+                                        "mediaTypes":  [
+
+                                                       ]
+                                    }
+                    },
+                    {
+                        "type":  "torrents-db",
+                        "instanceId":  "f8c",
+                        "enabled":  false,
+                        "options":  {
+                                        "name":  "TorrentsDB",
+                                        "timeout":  10000,
+                                        "resources":  [
+                                                          "stream",
+                                                          "catalog",
+                                                          "meta"
+                                                      ],
+                                        "providers":  [
+                                                          "yts",
+                                                          "1337x",
+                                                          "torrentcsv",
+                                                          "1lou",
+                                                          "nyaa",
+                                                          "sktorrent",
+                                                          "1tamilblasters",
+                                                          "limetorrent",
+                                                          "1tamilmv",
+                                                          "rargb",
+                                                          "knaben",
+                                                          "thepiratebay",
+                                                          "kickasstorrents",
+                                                          "animetosho",
+                                                          "extremlymtorrents",
+                                                          "yggtorrent",
+                                                          "tokyotosho",
+                                                          "rutor",
+                                                          "rutracker",
+                                                          "torrent9",
+                                                          "ilcorsaronero",
+                                                          "manual"
+                                                      ],
+                                        "includeP2P":  false,
+                                        "useMultipleInstances":  false,
+                                        "mediaTypes":  [
+
+                                                       ],
+                                        "services":  [
+                                                         "torbox"
+                                                     ]
+                                    }
+                    },
+                    {
+                        "type":  "stremthruStore",
+                        "instanceId":  "e6a",
+                        "enabled":  true,
+                        "options":  {
+                                        "name":  "StremThru Store",
+                                        "timeout":  7000,
+                                        "resources":  [
+                                                          "stream",
+                                                          "catalog",
+                                                          "meta"
+                                                      ],
+                                        "services":  [
+                                                         "torbox"
+                                                     ],
+                                        "mediaTypes":  [
+
+                                                       ]
+                                    }
+                    },
+                    {
+                        "type":  "torrent-galaxy",
+                        "instanceId":  "9f2",
+                        "enabled":  true,
+                        "options":  {
+                                        "name":  "TorrentGalaxy",
+                                        "timeout":  7000,
+                                        "services":  [
+                                                         "torbox"
+                                                     ],
+                                        "mediaTypes":  [
+
+                                                       ],
+                                        "useMultipleInstances":  false
+                                    }
+                    },
+                    {
+                        "type":  "torbox",
+                        "instanceId":  "471",
+                        "enabled":  true,
+                        "options":  {
+                                        "name":  "TorBox",
+                                        "timeout":  7000,
+                                        "resources":  [
+                                                          "stream",
+                                                          "meta",
+                                                          "catalog"
+                                                      ],
+                                        "mediaTypes":  [
+
+                                                       ]
+                                    }
+                    },
+                    {
+                        "type":  "torbox-search",
+                        "instanceId":  "27f",
+                        "enabled":  true,
+                        "options":  {
+                                        "name":  "TorBox Search",
+                                        "timeout":  7000,
+                                        "sources":  [
+                                                        "torrent",
+                                                        "usenet"
+                                                    ],
+                                        "services":  [
+                                                         "torbox"
+                                                     ],
+                                        "mediaTypes":  [
+
+                                                       ],
+                                        "userSearchEngines":  false,
+                                        "onlyShowUserSearchResults":  false,
+                                        "useMultipleInstances":  false
+                                    }
+                    },
+                    {
+                        "type":  "custom",
+                        "instanceId":  "b9c",
+                        "enabled":  true,
+                        "options":  {
+                                        "name":  "TV",
+                                        "manifestUrl":  "https://da5f663b4690-minhatv.baby-beamup.club/manifest.json",
+                                        "timeout":  10000,
+                                        "resources":  [
+
+                                                      ],
+                                        "mediaTypes":  [
+
+                                                       ],
+                                        "libraryAddon":  false,
+                                        "resultPassthrough":  true
+                                    }
+                    }
+                ],
+    "formatter":  {
+                      "id":  "custom",
+                      "definition":  {
+                                         "name":  "{stream.proxied::istrue[\"â˜ \"||\"\"]}\n{stream.type::=live[\" [LIVE ðŸ”´]\"||\"\"]}\n{stream.type::=p2p[\" [P2P âš ï¸]\"||\"\"]}\n{stream.type::=usenet[\" [USENET ðŸ“°]\"||\"\"]}\n{stream.type::=Http[\" [WEB ðŸŒ]\"||\"\"]}\n{stream.type::=External[\" [EXTLINK ðŸ”—]\"||\"\"]}\n{service.shortName::exists[\"[{service.shortName}\"||\"\"]}{service.cached::istrue[\"âš¡] \"||\"\"]}{service.cached::isfalse[\"â³] \"||\"\"]}{addon.name} {stream.resolution::=2160p[\"[âœ¨4K]\"||\"\"]}{stream.resolution::=1440p[\"[ðŸ“€ 1440p]\"||\"\"]}{stream.resolution::=1080p[\"[ðŸš€ 1080p]\"||\"\"]}{stream.resolution::=720p[\"[ðŸ’¿ 720p]\"||\"\"]}\n\n\n",
+                                         "description":  "ðŸŽ¬ {stream.title::exists[\"{stream.title}\"||\"\"]}{stream.year::exists[\" ({stream.year})\"||\"\"]} {stream.quality::exists[\"[{stream.quality}]\"||\"\"]}{stream.library::istrue[\" Â· ðŸ“‚\"||\"\"]} {stream.filename::~Extended[\"[Extended Cut] \"||\"\"]}{stream.filename::~Theatrical[\"[Theatrical Cut] \"||\"\"]}{stream.filename::~Director[\"[Director\u0027s Cut] \"||\"\"]}{stream.filename::~DC[\"[Director\u0027s Cut] \"||\"\"]}{stream.filename::~Ultimate[\"[Ultimate Edition] \"||\"\"]}{stream.filename::~Special[\"[Special Edition] \"||\"\"]}{stream.filename::~Alternate[\"[Alternate Edition] \"||\"\"]}{stream.filename::~Redux[\"[Redux] \"||\"\"]}\n\\n{stream.season::\u003e=0[\"S\"||\"\"]}{stream.season::\u003c=9[\"0\"||\"\"]}{stream.season::\u003e0[\"{stream.season}\"||\"\"]}{stream.episode::\u003e=0[\"  Â·  E\"||\"\"]}{stream.episode::\u003c=9[\"0\"||\"\"]}{stream.episode::\u003e0[\"{stream.episode}\"||\"\"]}\n\\n â€Ž \n\\n{stream.encode::exists[\"ðŸ“Ÿ  {stream.encode} \"||\"\"]}{stream.visualTags::exists[\"ðŸ”† {stream.visualTags::join(\u0027 Â· \u0027)} \"||\"\"]}\n\\n{stream.audioTags::exists[\"ðŸŽµ  {stream.audioTags::join(\u0027 Â· \u0027)} \"||\"\"]}{stream.audioChannels::exists[\"ðŸŽ§  {stream.audioChannels::join(\u0027 Â· \u0027)}\"||\"\"]}\n\\n{stream.size::\u003e0[\"ðŸ“¦  {stream.size::bytes} \"||\"\"]}{stream.folderSize::\u003e0[\"/ {stream.folderSize::bytes}\"||\"\"]}{stream.seeders::\u003e0[\" â‡‹ {stream.seeders} ðŸŒ± \"||\"\"]}{stream.duration::\u003e0[\" Â· â±ï¸ {stream.duration::time} \"||\"\"]}{stream.age::exists[\" Â· ðŸ“† {stream.age} \"||\"\"]}\n\\n{stream.proxied::istrue[\"ðŸ”’  \"||\"\"]}{stream.releaseGroup::exists[\"ðŸ·ï¸ {stream.releaseGroup}  Â· \"||\"\"]}{stream.indexer::exists[\"ðŸ“¡ {stream.indexer}\"||\"\"]}\n\\n{stream.languages::exists[\"ðŸ—£ï¸ {stream.languageEmojis::join(\u0027 / \u0027)::replace(\u0027ðŸ‡µðŸ‡¹\u0027, \u0027ðŸ‡§ðŸ‡·\u0027)::replace(\u0027PT\u0027, \u0027PT-BR\u0027)}\"||\"\"]}\n{stream.folderName::exists[\"ðŸ“  {stream.folderName}\"||\"\"]}\n{stream.filename::exists[\"ðŸ“„  {stream.filename}\"||\"\"]}\n\\n{stream.message::exists[\"â„¹ï¸  {stream.message}\"||\"\"]}"
+                                     }
+                  },
+    "preferredQualities":  [
+                               "BluRay REMUX",
+                               "BluRay",
+                               "WEB-DL",
+                               "WEBRip",
+                               "HDRip",
+                               "HC HD-Rip",
+                               "DVDRip",
+                               "HDTV",
+                               "CAM",
+                               "TS",
+                               "TC",
+                               "SCR",
+                               "Unknown"
+                           ],
+    "preferredResolutions":  [
+                                 "2160p",
+                                 "1440p",
+                                 "1080p",
+                                 "720p",
+                                 "576p",
+                                 "480p",
+                                 "360p",
+                                 "240p",
+                                 "144p",
+                                 "Unknown"
+                             ],
+    "excludedQualities":  [
+                              "CAM",
+                              "SCR",
+                              "TS",
+                              "TC"
+                          ],
+    "excludedVisualTags":  [
+                               "3D"
+                           ],
+    "sortCriteria":  {
+                         "global":  [
+                                        {
+                                            "key":  "language",
+                                            "direction":  "desc"
+                                        },
+                                        {
+                                            "key":  "resolution",
+                                            "direction":  "desc"
+                                        },
+                                        {
+                                            "key":  "library",
+                                            "direction":  "desc"
+                                        },
+                                        {
+                                            "key":  "cached",
+                                            "direction":  "desc"
+                                        },
+                                        {
+                                            "key":  "size",
+                                            "direction":  "desc"
+                                        },
+                                        {
+                                            "key":  "seeders",
+                                            "direction":  "desc"
+                                        }
+                                    ],
+                         "movies":  [
+
+                                    ],
+                         "series":  [
+
+                                    ],
+                         "anime":  [
+
+                                   ],
+                         "cached":  [
+
+                                    ],
+                         "uncached":  [
+
+                                      ],
+                         "cachedMovies":  [
+
+                                          ],
+                         "uncachedMovies":  [
+
+                                            ],
+                         "cachedSeries":  [
+
+                                          ],
+                         "uncachedSeries":  [
+
+                                            ],
+                         "cachedAnime":  [
+
+                                         ],
+                         "uncachedAnime":  [
+
+                                           ]
+                     },
+    "posterService":  "rpdb",
+    "deduplicator":  {
+                         "enabled":  false,
+                         "excludeAddons":  [
+
+                                           ],
+                         "multiGroupBehaviour":  "aggressive",
+                         "keys":  [
+                                      "filename",
+                                      "infoHash"
+                                  ],
+                         "cached":  "disabled",
+                         "uncached":  "disabled",
+                         "p2p":  "disabled"
+                     },
+    "autoPlay":  {
+                     "attributes":  [
+                                        "service",
+                                        "proxied",
+                                        "resolution",
+                                        "quality",
+                                        "encode",
+                                        "audioTags",
+                                        "visualTags",
+                                        "languages",
+                                        "releaseGroup",
+                                        "size"
+                                    ]
+                 },
+    "cacheAndPlay":  {
+                         "streamTypes":  [
+                                             "usenet"
+                                         ]
+                     },
+    "statistics":  {
+                       "enabled":  false,
+                       "statsToShow":  [
+                                           "addon",
+                                           "filter"
+                                       ]
+                   },
+    "digitalReleaseFilter":  {
+                                 "requestTypes":  [
+
+                                                  ],
+                                 "addons":  [
+
+                                            ]
+                             },
+    "ageRangeTypes":  [
+                          "usenet"
+                      ],
+    "seasonEpisodeMatching":  {
+                                  "enabled":  true,
+                                  "strict":  false,
+                                  "requestTypes":  [
+
+                                                   ],
+                                  "addons":  [
+                                                 "9a3"
+                                             ]
+                              },
+    "yearMatching":  {
+                         "requestTypes":  [
+
+                                          ],
+                         "addons":  [
+
+                                    ]
+                     },
+    "titleMatching":  {
+                          "mode":  "exact",
+                          "enabled":  false,
+                          "requestTypes":  [
+
+                                           ],
+                          "addons":  [
+
+                                     ]
+                      },
+    "precacheNextEpisode":  false,
+    "precacheSingleStream":  true,
+    "precacheSelector":  "count(cached(streams)) == 0 ? uncached(streams) : []",
+    "enableSeadex":  true,
+    "regexOverrides":  [
+
+                       ],
+    "checkOwned":  true,
+    "proxy":  {
+                  "enabled":  false,
+                  "id":  "mediaflow",
+                  "proxiedAddons":  [
+
+                                    ],
+                  "proxiedServices":  [
+
+                                      ]
+              },
+    "excludedResolutions":  [
+
+                            ],
+    "includedResolutions":  [
+
+                            ],
+    "requiredResolutions":  [
+
+                            ],
+    "includedQualities":  [
+
+                          ],
+    "requiredQualities":  [
+
+                          ],
+    "excludedLanguages":  [
+
+                          ],
+    "includedLanguages":  [
+
+                          ],
+    "requiredLanguages":  [
+                              "Portuguese",
+                              "English"
+                          ],
+    "preferredLanguages":  [
+                               "Portuguese",
+                               "English"
+                           ],
+    "includedVisualTags":  [
+
+                           ],
+    "requiredVisualTags":  [
+
+                           ],
+    "preferredVisualTags":  [
+
+                            ],
+    "excludedAudioTags":  [
+
+                          ],
+    "includedAudioTags":  [
+
+                          ],
+    "requiredAudioTags":  [
+
+                          ],
+    "preferredAudioTags":  [
+
+                           ],
+    "excludedAudioChannels":  [
+
+                              ],
+    "includedAudioChannels":  [
+
+                              ],
+    "requiredAudioChannels":  [
+
+                              ],
+    "preferredAudioChannels":  [
+
+                               ],
+    "excludedStreamTypes":  [
+
+                            ],
+    "includedStreamTypes":  [
+
+                            ],
+    "requiredStreamTypes":  [
+
+                            ],
+    "preferredStreamTypes":  [
+
+                             ],
+    "excludedEncodes":  [
+
+                        ],
+    "includedEncodes":  [
+
+                        ],
+    "requiredEncodes":  [
+
+                        ],
+    "preferredEncodes":  [
+
+                         ],
+    "requiredRegexPatterns":  [
+
+                              ],
+    "syncedRequiredStreamExpressionUrls":  [
+
+                                           ],
+    "seederRangeTypes":  [
+
+                         ],
+    "excludeSeasonPacks":  false,
+    "excludeCachedFromAddons":  [
+
+                                ],
+    "excludeCachedFromServices":  [
+
+                                  ],
+    "excludeCachedFromStreamTypes":  [
+
+                                     ],
+    "excludeUncachedFromAddons":  [
+
+                                  ],
+    "excludeUncachedFromServices":  [
+
+                                    ],
+    "excludeUncachedFromStreamTypes":  [
+
+                                       ],
+    "dynamicAddonFetching":  {
+                                 "enabled":  false
+                             },
+    "groups":  {
+                   "enabled":  false
+               },
+    "hideErrors":  false,
+    "hideErrorsForResources":  [
+
+                               ],
+    "catalogModifications":  [
+                                 {
+                                     "id":  "471e3b0.user-movies",
+                                     "type":  "movie",
+                                     "name":  "Your Media",
+                                     "shuffle":  false,
+                                     "enabled":  true,
+                                     "usePosterService":  false,
+                                     "hideable":  true,
+                                     "searchable":  true,
+                                     "addonName":  "TorBox"
+                                 },
+                                 {
+                                     "id":  "e6a791b.st:store:tb",
+                                     "type":  "other",
+                                     "name":  "Store TB",
+                                     "shuffle":  false,
+                                     "enabled":  true,
+                                     "usePosterService":  false,
+                                     "hideable":  true,
+                                     "searchable":  true,
+                                     "addonName":  "StremThru Store"
+                                 },
+                                 {
+                                     "id":  "885e3b0.cloutstream-recentes",
+                                     "name":  "Ãšltimos Filmes",
+                                     "type":  "movie",
+                                     "enabled":  true,
+                                     "shuffle":  false,
+                                     "usePosterService":  false,
+                                     "hideable":  true,
+                                     "searchable":  true,
+                                     "addonName":  "CloutStream"
+                                 },
+                                 {
+                                     "id":  "885e3b0.cloutstream-recentes-series",
+                                     "name":  "Ãšltimas SÃ©ries",
+                                     "type":  "series",
+                                     "enabled":  true,
+                                     "shuffle":  false,
+                                     "usePosterService":  false,
+                                     "hideable":  true,
+                                     "searchable":  true,
+                                     "addonName":  "CloutStream"
+                                 },
+                                 {
+                                     "id":  "885e3b0.cloutstream-recentes-animes",
+                                     "name":  "Ãšltimos Animes",
+                                     "type":  "series",
+                                     "enabled":  true,
+                                     "shuffle":  false,
+                                     "usePosterService":  false,
+                                     "hideable":  true,
+                                     "searchable":  true,
+                                     "addonName":  "CloutStream"
+                                 },
+                                 {
+                                     "id":  "9b6e3b0.brazuca-torbox-torrents",
+                                     "name":  "TorBox Torrents",
+                                     "type":  "other",
+                                     "enabled":  true,
+                                     "shuffle":  false,
+                                     "usePosterService":  false,
+                                     "hideable":  true,
+                                     "searchable":  false,
+                                     "addonName":  "Brazuca Torrents"
+                                 },
+                                 {
+                                     "id":  "9b6e3b0.brazuca-torbox-usenet",
+                                     "name":  "TorBox Usenet",
+                                     "type":  "other",
+                                     "enabled":  true,
+                                     "shuffle":  false,
+                                     "usePosterService":  false,
+                                     "hideable":  true,
+                                     "searchable":  false,
+                                     "addonName":  "Brazuca Torrents"
+                                 },
+                                 {
+                                     "id":  "9b6e3b0.brazuca-torbox-webdl",
+                                     "name":  "TorBox WebDL",
+                                     "type":  "other",
+                                     "enabled":  true,
+                                     "shuffle":  false,
+                                     "usePosterService":  false,
+                                     "hideable":  true,
+                                     "searchable":  false,
+                                     "addonName":  "Brazuca Torrents"
+                                 },
+                                 {
+                                     "id":  "6d3e3b0.top_movies",
+                                     "name":  "CineTorrent - Top",
+                                     "type":  "movie",
+                                     "enabled":  true,
+                                     "shuffle":  false,
+                                     "usePosterService":  false,
+                                     "hideable":  true,
+                                     "searchable":  false,
+                                     "addonName":  "CineTorrent"
+                                 },
+                                 {
+                                     "id":  "b9ce3b0.minhatv_channels",
+                                     "name":  "Minha TV",
+                                     "type":  "tv",
+                                     "enabled":  true,
+                                     "shuffle":  false,
+                                     "usePosterService":  false,
+                                     "hideable":  true,
+                                     "searchable":  false,
+                                     "addonName":  "TV"
+                                 }
+                             ],
+    "externalDownloads":  false
+}
