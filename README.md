@@ -1,4 +1,8 @@
 <p align="center">
+  <img src="https://raw.githubusercontent.com/GuickerZ/guindex/main/public/guindex-logo.png" width="180" alt="GuIndex Logo">
+</p>
+
+<p align="center">
   <strong>GuIndex</strong><br>
   <em>Addon Stremio para conteudo brasileiro via Real-Debrid / TorBox</em>
 </p>
