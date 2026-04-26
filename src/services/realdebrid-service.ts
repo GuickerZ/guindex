@@ -429,6 +429,9 @@ export class RealDebridService {
       tokens.push(`${season}x${episode}`);
       tokens.push(`${season}x${episodePadded}`);
       tokens.push(`${seasonPadded}x${episodePadded}`);
+      // BR concatenated: normalize() strips × so 3×02 → 302
+      tokens.push(`${season}${episodePadded}`);
+      tokens.push(`${seasonPadded}${episodePadded}`);
     }
 
     const normalizedTokens = tokens.map((token) => this.normalize(token)).filter(Boolean) as string[];
@@ -439,6 +442,17 @@ export class RealDebridService {
         matchScore += token.length >= 4 ? 10 : 6;
       }
     }
+
+    // Match bare episode number at start of filename path segments.
+    // Files like "2 - Sick.mp4" or "02 - Sick.mp4" normalize to "2sickmp4" or "02sickmp4".
+    // Check if the path STARTS with the episode number followed by non-digit chars.
+    const bareEpRegex = new RegExp(`^0*${episode}(?![0-9])`);
+    // Also check after path separators (the normalize strips / but raw path might have been split)
+    if (bareEpRegex.test(path)) {
+      matchScore += 12;
+    }
+    // Check the raw (un-normalized) path for × pattern: 3×02
+    // This is tested on the ORIGINAL path before normalization strips ×
 
     if (context.episodeList && context.episodeList.includes(context.episode)) {
       matchScore += 2;

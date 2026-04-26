@@ -321,17 +321,36 @@ export class TorboxService {
       `e${episode}`,
       `ep${episode}`,
       `episode${episode}`,
+      `episodio${episode}`,
+      `capitulo${episode}`,
       `e${epPadded}`,
       `ep${epPadded}`,
-      `episode${epPadded}`
+      `episode${epPadded}`,
+      `episodio${epPadded}`
     ];
 
     if (season !== undefined) {
       const s = String(season).padStart(2, '0');
-      tokens.push(`s${season}e${episode}`, `s${s}e${epPadded}`, `${season}x${episode}`, `${s}x${epPadded}`);
+      tokens.push(
+        `s${season}e${episode}`, `s${s}e${epPadded}`,
+        `${season}x${episode}`, `${s}x${epPadded}`,
+        `${season}x${epPadded}`, `${s}x${episode}`,
+        // × (multiplication sign) variants — common in BR torrents
+        `${season}\u00d7${episode}`, `${s}\u00d7${epPadded}`,
+        `${season}\u00d7${epPadded}`, `${s}\u00d7${episode}`
+      );
     }
 
-    return tokens.reduce((acc, token) => (path.includes(token) ? acc + 6 : acc), 0);
+    let matchScore = tokens.reduce((acc, token) => (path.includes(token) ? acc + 6 : acc), 0);
+
+    // Match bare episode number at start of filename.
+    // Files like "2 - Sick.mp4" → rawLower = "2 - sick.mp4"
+    const bareEpRegex = new RegExp(`(?:^|[\\\\/])0*${episode}\\s*[-._\\s]`);
+    if (bareEpRegex.test(path)) {
+      matchScore += 12;
+    }
+
+    return matchScore;
   }
 
   private isVideoFile(path: string): boolean {
