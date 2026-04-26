@@ -10,10 +10,11 @@ export class ConfigService {
     const port = Number(process.env.PORT || 7000);
     const logLevel = (process.env.LOG_LEVEL as AppConfig['logLevel']) || 'info';
 
-    // BASE_URL > VERCEL_URL > RENDER_EXTERNAL_URL > localhost
+    // BASE_URL > VERCEL_PROJECT_PRODUCTION_URL > VERCEL_URL > RENDER_EXTERNAL_URL > localhost
     const normalizedBaseUrl =
       ConfigService.normalizeBaseUrl(process.env.BASE_URL) ||
-      ConfigService.normalizeBaseUrl(process.env.VERCEL_URL) ||
+      ConfigService.normalizeBaseUrl(process.env.VERCEL_PROJECT_PRODUCTION_URL) ||
+      (process.env.VERCEL_ENV === 'production' ? 'https://guindex-stremio.vercel.app' : ConfigService.normalizeBaseUrl(process.env.VERCEL_URL)) ||
       ConfigService.normalizeBaseUrl(process.env.RENDER_EXTERNAL_URL) ||
       ConfigService.normalizeBaseUrl(`http://localhost:${port}`)!;
 
