@@ -6,9 +6,12 @@ import { StremioAddonProvider } from '../services/stremio-addon-provider.js';
 import { TorrentIndexerProvider } from '../services/torrent-indexer-provider.js';
 import type { BaseSourceProvider } from '../services/base-source-provider.js';
 
-const TORRENT_INDEXER_BASE_URL =
-  process.env.TORRENT_INDEXER_URL ||
-  'https://torrent-indexer.darklyn.org';
+const TORRENT_INDEXER_BASE_URL = process.env.TORRENT_INDEXER_URL || '';
+
+if (!TORRENT_INDEXER_BASE_URL) {
+  console.warn('[GuIndex] TORRENT_INDEXER_URL nao definida! Configure sua propria instancia do torrent-indexer.');
+  console.warn('[GuIndex] Veja: https://github.com/felipemarinho97/torrent-indexer');
+}
 
 export const SOURCES: BaseSourceProvider[] = [
   new TorrentIndexerProvider('GuIndex', TORRENT_INDEXER_BASE_URL),

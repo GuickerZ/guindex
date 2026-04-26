@@ -59,17 +59,17 @@ Stremio -> GuIndex -> torrent-indexer -> sites brasileiros de torrent
   <a href="https://github.com/felipemarinho97/torrent-indexer"><img src="https://img.shields.io/github/stars/felipemarinho97/torrent-indexer?style=for-the-badge&color=f59e0b&labelColor=111118&label=torrent-indexer%20stars" alt="torrent-indexer stars"></a>
 </p>
 
-**Recomendamos fortemente que voce faca self-host do torrent-indexer** para maior controle, menor latencia e para nao sobrecarregar a instancia publica:
+**Voce precisa hospedar sua propria instancia do torrent-indexer.** O GuIndex nao inclui nenhuma instancia publica padrao — cada usuario deve fazer deploy do seu proprio indexador:
 
 ```bash
-# Docker
+# Docker (mais simples)
 docker run -p 8080:8080 ghcr.io/felipemarinho97/torrent-indexer:latest
 
-# Configure no GuIndex:
+# Configure no .env do GuIndex:
 TORRENT_INDEXER_URL=http://localhost:8080
 ```
 
-A instancia publica `https://torrent-indexer.darklyn.org` pode ficar indisponivel. Self-host garante estabilidade.
+Opcoes de hosting: **Render** (free tier), **Railway**, **Fly.io**, ou qualquer VPS com Docker.
 
 Consulte o [README do torrent-indexer](https://github.com/felipemarinho97/torrent-indexer) para mais detalhes sobre os sites suportados e como configurar.
 
