@@ -20,9 +20,7 @@ export class ConfigController {
       resources: ['stream'],
       types: ['movie', 'series'],
       idPrefixes: ['tt'],
-      // TODO: Apos subir o logo no GitHub, atualize as URLs abaixo:
-      // logo: 'https://raw.githubusercontent.com/GuickerZ/guindex/main/public/logo.png',
-      // background: 'https://raw.githubusercontent.com/GuickerZ/guindex/main/public/background.png',
+      logo: 'https://raw.githubusercontent.com/GuickerZ/guindex/main/public/logo.png',
       behaviorHints: {
         adult: false,
         p2p: false,
