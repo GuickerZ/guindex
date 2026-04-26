@@ -35,4 +35,8 @@ export interface AddonManifest {
     options?: string[];
     default?: string;
   }>;
+  stremioAddonsConfig?: {
+    issuer: string;
+    signature: string;
+  };
 }

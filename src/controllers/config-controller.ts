@@ -48,7 +48,11 @@ export class ConfigController {
           title: 'Token API TorBox',
           description: 'Seu token da API TorBox para acessar links premium'
         }
-      ]
+      ],
+      stremioAddonsConfig: {
+        issuer: 'https://stremio-addons.net',
+        signature: 'eyJhbGciOiJkaXIiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0..9Gt-l6yAe0hT6TNuH1hTJQ.o6CoZLJ1l5t_Mg-gC-kb-UjmANxYSmNxKelV6LRowL-nBGiC343s6Hbu1hw-uYE1_TAeHbwtZysKds9luRbyJ1PB7gMvsQOxZuLNFe9v0IGuxB-kn4WLW6euGLbAP1s9.mlZU3aeRU4kLvLztuVscWA'
+      }
     };
   }
 
