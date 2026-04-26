@@ -13,7 +13,7 @@ services:
       # - TORRENT_INDEXER_SEARCH_CACHE_TTL_MS=120000
       # - TORRENT_INDEXER_INDEXERS_CACHE_TTL_MS=600000
       # - TORRENT_INDEXER_FALLBACK_MAX_INDEXERS=7
-      # - TORRENT_INDEXER_FALLBACK_PER_INDEXER_LIMIT=12
+      # - TORRENT_INDEXER_FALLBACK_PER_INDEXER_LIMIT=0  # 0 = sem limite na query
       # - TORRENT_INDEXER_FALLBACK_CONCURRENCY=3
       # OBRIGATÓRIO: defina o domínio público da sua instância
       # - BASE_URL=https://seu-dominio.com

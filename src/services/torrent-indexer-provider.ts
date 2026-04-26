@@ -56,6 +56,22 @@ interface SearchCacheEntry {
   data: TorrentLike[];
 }
 
+interface IndexerPerformanceEntry {
+  avgMs: number;
+  samples: number;
+  hits: number;
+  emptyHits: number;
+  lastDurationMs: number;
+  lastSeenAt: number;
+}
+
+interface FallbackSearchOptions {
+  excludeIndexers?: Set<string>;
+  maxIndexers?: number;
+  perIndexerLimit?: number;
+  targetResults?: number;
+}
+
 const parsePositiveInt = (value: string | undefined, fallback: number): number => {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
@@ -70,6 +86,10 @@ const parseBoolean = (value: string | undefined, fallback: boolean): boolean => 
 };
 
 const MAX_STREAMS = 60;
+const MAX_STREAMS_PER_SOURCE = parsePositiveInt(
+  process.env.TORRENT_INDEXER_MAX_STREAMS_PER_SOURCE,
+  18,
+);
 const MAX_TEXT_QUERIES = 12;
 const INDEXER_QUERY_PROFILES: Record<string, IndexerQueryProfile> = {
   'comando_torrents': { supportsImdbQuery: false },
@@ -298,12 +318,29 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
   );
   private static readonly FALLBACK_PER_INDEXER_LIMIT = parsePositiveInt(
     process.env.TORRENT_INDEXER_FALLBACK_PER_INDEXER_LIMIT,
-    12,
+    0,
   );
   private static readonly FALLBACK_INDEXER_CONCURRENCY = parsePositiveInt(
     process.env.TORRENT_INDEXER_FALLBACK_CONCURRENCY,
     3,
   );
+  private static readonly FALLBACK_REQUEST_TIMEOUT_MS = parsePositiveInt(
+    process.env.TORRENT_INDEXER_FALLBACK_TIMEOUT_MS,
+    4500,
+  );
+  private static readonly HYBRID_MIN_RESULTS = parsePositiveInt(
+    process.env.TORRENT_INDEXER_HYBRID_MIN_RESULTS,
+    10,
+  );
+  private static readonly HYBRID_MIN_INDEXERS = parsePositiveInt(
+    process.env.TORRENT_INDEXER_HYBRID_MIN_INDEXERS,
+    2,
+  );
+  private static readonly HYBRID_TARGET_RESULTS = parsePositiveInt(
+    process.env.TORRENT_INDEXER_HYBRID_TARGET_RESULTS,
+    24,
+  );
+  private static readonly indexerPerformance = new Map<string, IndexerPerformanceEntry>();
 
   constructor(name: string, baseUrl: string) {
     super(name);
@@ -376,6 +413,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
     const seen = new Set<string>();
     const streams: SourceStream[] = [];
+    const sourceCounts = new Map<string, number>();
 
     for (const query of queries) {
       const torrents = await this.fetchSearchResults(query);
@@ -394,7 +432,14 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
           continue;
         }
 
+        const sourceKey = (stream.source ?? 'unknown').toLowerCase();
+        const sourceCount = sourceCounts.get(sourceKey) ?? 0;
+        if (sourceCount >= MAX_STREAMS_PER_SOURCE) {
+          continue;
+        }
+
         streams.push(stream);
+        sourceCounts.set(sourceKey, sourceCount + 1);
         if (dedupeKey) {
           seen.add(dedupeKey);
         }
@@ -573,33 +618,66 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
     try {
       const response = await request(url.toString(), {
-        signal: AbortSignal.timeout(8000),
+        signal: AbortSignal.timeout(TorrentIndexerProvider.FALLBACK_REQUEST_TIMEOUT_MS),
         headers: { 'Accept': 'application/json' },
       });
       if (response.statusCode >= 400) {
-        return [];
+        const fallbackResults = await this.fetchSearchResultsWithRetry(query);
+        TorrentIndexerProvider.searchCache.set(cacheKey, { ts: Date.now(), data: fallbackResults });
+        return fallbackResults;
       }
 
       const payload = await response.body.json();
       const searchResults = this.normalizeTorrentPayload(payload);
-      if (searchResults.length > 0) {
+      if (!this.shouldBoostWithFallback(searchResults)) {
         TorrentIndexerProvider.searchCache.set(cacheKey, { ts: Date.now(), data: searchResults });
         return searchResults;
       }
 
-      // Self-hosted instances may keep /search as cache-only and return empty often.
-      // Fallback to direct per-indexer search so GuIndex still finds results.
-      const fallbackResults = await this.fetchSearchResultsFromIndexers(query);
-      TorrentIndexerProvider.searchCache.set(cacheKey, { ts: Date.now(), data: fallbackResults });
-      return fallbackResults;
+      const presentIndexers = this.collectIndexerSlugs(searchResults);
+      const fallbackResults = await this.fetchSearchResultsWithRetry(query, {
+        excludeIndexers: presentIndexers,
+        targetResults: Math.max(
+          TorrentIndexerProvider.HYBRID_TARGET_RESULTS - searchResults.length,
+          1,
+        ),
+      });
+
+      const merged = this.mergeTorrentResults(searchResults, fallbackResults);
+      TorrentIndexerProvider.searchCache.set(cacheKey, { ts: Date.now(), data: merged });
+      return merged;
     } catch {
-      const fallbackResults = await this.fetchSearchResultsFromIndexers(query);
+      const fallbackResults = await this.fetchSearchResultsWithRetry(query);
       TorrentIndexerProvider.searchCache.set(cacheKey, { ts: Date.now(), data: fallbackResults });
       return fallbackResults;
     }
   }
 
-  private async fetchSearchResultsFromIndexers(query: string): Promise<TorrentLike[]> {
+  private async fetchSearchResultsWithRetry(
+    query: string,
+    options?: FallbackSearchOptions,
+  ): Promise<TorrentLike[]> {
+    const variants = this.buildSearchRetryQueries(query);
+    let merged: TorrentLike[] = [];
+
+    for (let i = 0; i < variants.length; i += 1) {
+      const variant = variants[i];
+      if (!variant) {
+        continue;
+      }
+      const results = await this.fetchSearchResultsFromIndexers(variant, {
+        ...options,
+      });
+      merged = this.mergeTorrentResults(merged, results);
+    }
+
+    return merged;
+  }
+
+  private async fetchSearchResultsFromIndexers(
+    query: string,
+    options?: FallbackSearchOptions,
+  ): Promise<TorrentLike[]> {
     if (!TorrentIndexerProvider.ENABLE_FALLBACK_INDEXER_SEARCH) {
       return [];
     }
@@ -609,9 +687,27 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       return [];
     }
 
-    const selected = indexers.slice(0, TorrentIndexerProvider.FALLBACK_MAX_INDEXERS);
-    const settled: PromiseSettledResult<TorrentLike[]>[] = [];
+    const maxIndexers = options?.maxIndexers ?? indexers.length;
+    const perIndexerLimit =
+      options?.perIndexerLimit ?? TorrentIndexerProvider.FALLBACK_PER_INDEXER_LIMIT;
+    const excluded = options?.excludeIndexers;
 
+    const selected = indexers
+      .filter((name) => {
+        if (!excluded || excluded.size === 0) {
+          return true;
+        }
+        const normalized = this.normalizeIndexerSlug(name);
+        return !excluded.has(normalized);
+      })
+      .sort((a, b) => this.compareIndexerPriority(a, b))
+      .slice(0, maxIndexers);
+
+    if (selected.length === 0) {
+      return [];
+    }
+
+    const settled: PromiseSettledResult<TorrentLike[]>[] = [];
     for (let i = 0; i < selected.length; i += TorrentIndexerProvider.FALLBACK_INDEXER_CONCURRENCY) {
       const batch = selected.slice(i, i + TorrentIndexerProvider.FALLBACK_INDEXER_CONCURRENCY);
       const batchSettled = await Promise.allSettled(
@@ -619,7 +715,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
           this.fetchSingleIndexerSearch(
             name,
             query,
-            TorrentIndexerProvider.FALLBACK_PER_INDEXER_LIMIT,
+            perIndexerLimit,
           ),
         ),
       );
@@ -663,11 +759,12 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       }
 
       const parsedNames = names.filter((name): name is string => typeof name === 'string' && name.length > 0);
+      const sorted = [...parsedNames].sort((a, b) => this.compareIndexerPriority(a, b));
       TorrentIndexerProvider.indexerNamesCache = {
         ts: Date.now(),
-        names: parsedNames,
+        names: sorted,
       };
-      return parsedNames;
+      return sorted;
     } catch {
       return [];
     }
@@ -689,24 +786,222 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       return [];
     }
 
+    const startedAt = Date.now();
     const url = new URL(`${this.baseUrl}/indexers/${encodeURIComponent(indexerName)}`);
     url.searchParams.set('q', query);
-    url.searchParams.set('limit', String(limit));
+    if (limit > 0) {
+      url.searchParams.set('limit', String(limit));
+    }
 
     try {
       const response = await request(url.toString(), {
-        signal: AbortSignal.timeout(7000),
+        signal: AbortSignal.timeout(TorrentIndexerProvider.FALLBACK_REQUEST_TIMEOUT_MS),
         headers: { Accept: 'application/json' },
       });
       if (response.statusCode >= 400) {
+        this.recordIndexerPerformance(normalizedIndexer, Date.now() - startedAt, 0);
         return [];
       }
 
       const payload = await response.body.json();
-      return this.normalizeTorrentPayload(payload);
+      const results = this.normalizeTorrentPayload(payload);
+      this.recordIndexerPerformance(normalizedIndexer, Date.now() - startedAt, results.length);
+      return results;
     } catch {
+      this.recordIndexerPerformance(normalizedIndexer, Date.now() - startedAt, 0);
       return [];
     }
+  }
+
+  private buildSearchRetryQueries(query: string): string[] {
+    const base = this.sanitizeQuery(query);
+    if (!base) {
+      return [query];
+    }
+
+    const variants: string[] = [];
+    const add = (value?: string) => {
+      if (!value) {
+        return;
+      }
+      const cleaned = this.sanitizeQuery(value);
+      if (!cleaned) {
+        return;
+      }
+      if (!variants.includes(cleaned)) {
+        variants.push(cleaned);
+      }
+    };
+
+    add(base);
+
+    if (!/^tt\d+$/i.test(base)) {
+      const withoutEpisode = base
+        .replace(/\bS\d{1,3}E\d{1,3}\b/gi, ' ')
+        .replace(/\b\d{1,3}x\d{1,3}\b/gi, ' ')
+        .replace(/\b(?:epis[oó]dio|episodio|episode|ep|cap[ií]tulo|capitulo|cap)\.?\s*\d{1,3}\b/gi, ' ')
+        .replace(/\b(?:temporada|season|temp\.?|t)\s*\d{1,3}\b/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      add(withoutEpisode);
+
+      const withoutYear = base.replace(/\b(19|20)\d{2}\b/g, ' ').replace(/\s+/g, ' ').trim();
+      add(withoutYear);
+    }
+
+    return variants.slice(0, 4);
+  }
+
+  private shouldBoostWithFallback(results: TorrentLike[]): boolean {
+    if (results.length === 0) {
+      return true;
+    }
+
+    if (results.length < TorrentIndexerProvider.HYBRID_MIN_RESULTS) {
+      return true;
+    }
+
+    const uniqueIndexers = this.collectIndexerSlugs(results);
+    return uniqueIndexers.size < TorrentIndexerProvider.HYBRID_MIN_INDEXERS;
+  }
+
+  private compareIndexerPriority(a: string, b: string): number {
+    const slugA = this.normalizeIndexerSlug(a);
+    const slugB = this.normalizeIndexerSlug(b);
+    const statsA = TorrentIndexerProvider.indexerPerformance.get(slugA);
+    const statsB = TorrentIndexerProvider.indexerPerformance.get(slugB);
+
+    if (statsA && statsB) {
+      if (statsA.hits !== statsB.hits) {
+        return statsB.hits - statsA.hits;
+      }
+      if (statsA.avgMs !== statsB.avgMs) {
+        return statsA.avgMs - statsB.avgMs;
+      }
+      if (statsA.emptyHits !== statsB.emptyHits) {
+        return statsA.emptyHits - statsB.emptyHits;
+      }
+    } else if (statsA) {
+      return -1;
+    } else if (statsB) {
+      return 1;
+    }
+
+    return a.localeCompare(b);
+  }
+
+  private collectIndexerSlugs(results: TorrentLike[]): Set<string> {
+    const names = new Set<string>();
+    for (const torrent of results) {
+      const raw = this.extractIndexerRawName(torrent);
+      if (!raw) {
+        continue;
+      }
+      const normalized = this.normalizeIndexerSlug(raw);
+      if (normalized) {
+        names.add(normalized);
+      }
+    }
+    return names;
+  }
+
+  private extractIndexerRawName(torrent: TorrentLike): string | undefined {
+    const record = torrent as Record<string, unknown>;
+    const candidate =
+      record.indexer ||
+      record.indexerName ||
+      record.indexer_name ||
+      record.source ||
+      record.provider ||
+      record.origin ||
+      record.site;
+
+    if (typeof candidate !== 'string') {
+      return undefined;
+    }
+
+    return candidate.trim() || undefined;
+  }
+
+  private normalizeIndexerSlug(value: string): string {
+    const cleaned = this.sanitizeQuery(value)?.toLowerCase() ?? value.toLowerCase();
+    return cleaned
+      .replace(/\s+/g, '_')
+      .replace(/[^a-z0-9_-]+/g, '')
+      .trim();
+  }
+
+  private recordIndexerPerformance(indexerSlug: string, durationMs: number, resultCount: number): void {
+    const current = TorrentIndexerProvider.indexerPerformance.get(indexerSlug);
+    const next: IndexerPerformanceEntry = current
+      ? {
+          avgMs: current.avgMs * 0.7 + durationMs * 0.3,
+          samples: current.samples + 1,
+          hits: current.hits + (resultCount > 0 ? 1 : 0),
+          emptyHits: current.emptyHits + (resultCount === 0 ? 1 : 0),
+          lastDurationMs: durationMs,
+          lastSeenAt: Date.now(),
+        }
+      : {
+          avgMs: durationMs,
+          samples: 1,
+          hits: resultCount > 0 ? 1 : 0,
+          emptyHits: resultCount === 0 ? 1 : 0,
+          lastDurationMs: durationMs,
+          lastSeenAt: Date.now(),
+        };
+
+    TorrentIndexerProvider.indexerPerformance.set(indexerSlug, next);
+  }
+
+  private mergeTorrentResults(primary: TorrentLike[], secondary: TorrentLike[]): TorrentLike[] {
+    if (secondary.length === 0) {
+      return [...primary];
+    }
+
+    const merged = [...primary];
+    const seen = new Set<string>();
+
+    for (const torrent of primary) {
+      seen.add(this.buildTorrentMergeKey(torrent));
+    }
+
+    for (const torrent of secondary) {
+      const key = this.buildTorrentMergeKey(torrent);
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      merged.push(torrent);
+    }
+
+    return merged;
+  }
+
+  private buildTorrentMergeKey(torrent: TorrentLike): string {
+    const record = torrent as Record<string, unknown>;
+    const magnet = this.toString(record.magnet_link) || this.toString(record.magnet);
+    if (magnet) {
+      return `magnet:${magnet}`;
+    }
+
+    const hash =
+      this.toString(record.info_hash) ||
+      this.toString(record.infoHash) ||
+      this.toString(record.hash) ||
+      this.toString(record.btih);
+    if (hash) {
+      return `hash:${hash.toLowerCase()}`;
+    }
+
+    const details = this.toString(record.details) || this.toString(record.url) || this.toString(record.link);
+    if (details) {
+      return `details:${details}`;
+    }
+
+    const title = this.toString(record.title) || this.toString(record.original_title) || this.toString(record.name) || '';
+    const size = this.toString(record.size) || this.toString(record.size_bytes) || '';
+    return `title:${title.toLowerCase()}|size:${size}`;
   }
 
   private parseId(id: string): ParsedIdInfo {
