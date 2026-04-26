@@ -47,6 +47,24 @@ interface IndexedTorrentFile {
   originalIndex: number;
 }
 
+interface SearchCacheEntry {
+  ts: number;
+  data: TorrentLike[];
+}
+
+const parsePositiveInt = (value: string | undefined, fallback: number): number => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+};
+
+const parseBoolean = (value: string | undefined, fallback: boolean): boolean => {
+  if (value === undefined) return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return fallback;
+};
+
 const MAX_STREAMS = 60;
 const EPISODIC_HINT_REGEX =
   /(S[0-9]{1,3}(E[0-9]{1,3})?|S[0-9]{1,3}[._ -]?(19|20)[0-9]{2}|[0-9]+[xÃ—][0-9]+|temporadas?|season|seasons|temp\.?\s*\d|epis[oÃ³]dios?|epis[oÃ³]dio|episode|episodes|serie|sÃ©rie|sÃ©ries|series|minissÃ©rie|mini[\s-]?s[eÃ©]rie|ep\.?\s*[0-9]+|cap[iÃ­]tulo|capitulo|cap\.?\s*[0-9]+|completa|completo|complete|collection|cole[Ã§c][aÃ£]o|box\s*set|pack|integral|[0-9]+[ÂªÂºa]\s*temp)/i;
@@ -245,6 +263,34 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
   /** In-memory Cinemeta cache (shared across instances) */
   private static cinemetaCache = new Map<string, { data: CinemetaMeta; ts: number }>();
   private static readonly CINEMETA_TTL = 5 * 60 * 1000; // 5 min
+  private static searchCache = new Map<string, SearchCacheEntry>();
+  private static indexerNamesCache:
+    | { ts: number; names: string[] }
+    | undefined;
+  private static readonly SEARCH_CACHE_TTL_MS = parsePositiveInt(
+    process.env.TORRENT_INDEXER_SEARCH_CACHE_TTL_MS,
+    120_000,
+  );
+  private static readonly INDEXER_NAMES_CACHE_TTL_MS = parsePositiveInt(
+    process.env.TORRENT_INDEXER_INDEXERS_CACHE_TTL_MS,
+    600_000,
+  );
+  private static readonly ENABLE_FALLBACK_INDEXER_SEARCH = parseBoolean(
+    process.env.TORRENT_INDEXER_ENABLE_FALLBACK,
+    true,
+  );
+  private static readonly FALLBACK_MAX_INDEXERS = parsePositiveInt(
+    process.env.TORRENT_INDEXER_FALLBACK_MAX_INDEXERS,
+    7,
+  );
+  private static readonly FALLBACK_PER_INDEXER_LIMIT = parsePositiveInt(
+    process.env.TORRENT_INDEXER_FALLBACK_PER_INDEXER_LIMIT,
+    12,
+  );
+  private static readonly FALLBACK_INDEXER_CONCURRENCY = parsePositiveInt(
+    process.env.TORRENT_INDEXER_FALLBACK_CONCURRENCY,
+    3,
+  );
 
   constructor(name: string, baseUrl: string) {
     super(name);
@@ -497,6 +543,12 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
   
 
   private async fetchSearchResults(query: string): Promise<TorrentLike[]> {
+    const cacheKey = this.getSearchCacheKey(query);
+    const cached = TorrentIndexerProvider.searchCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < TorrentIndexerProvider.SEARCH_CACHE_TTL_MS) {
+      return cached.data;
+    }
+
     const url = new URL(`${this.baseUrl}/search`);
     url.searchParams.set('q', query);
 
@@ -504,6 +556,121 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       const response = await request(url.toString(), {
         signal: AbortSignal.timeout(8000),
         headers: { 'Accept': 'application/json' },
+      });
+      if (response.statusCode >= 400) {
+        return [];
+      }
+
+      const payload = await response.body.json();
+      const searchResults = this.normalizeTorrentPayload(payload);
+      if (searchResults.length > 0) {
+        TorrentIndexerProvider.searchCache.set(cacheKey, { ts: Date.now(), data: searchResults });
+        return searchResults;
+      }
+
+      // Self-hosted instances may keep /search as cache-only and return empty often.
+      // Fallback to direct per-indexer search so GuIndex still finds results.
+      const fallbackResults = await this.fetchSearchResultsFromIndexers(query);
+      TorrentIndexerProvider.searchCache.set(cacheKey, { ts: Date.now(), data: fallbackResults });
+      return fallbackResults;
+    } catch {
+      const fallbackResults = await this.fetchSearchResultsFromIndexers(query);
+      TorrentIndexerProvider.searchCache.set(cacheKey, { ts: Date.now(), data: fallbackResults });
+      return fallbackResults;
+    }
+  }
+
+  private async fetchSearchResultsFromIndexers(query: string): Promise<TorrentLike[]> {
+    if (!TorrentIndexerProvider.ENABLE_FALLBACK_INDEXER_SEARCH) {
+      return [];
+    }
+
+    const indexers = await this.fetchIndexerNames();
+    if (indexers.length === 0) {
+      return [];
+    }
+
+    const selected = indexers.slice(0, TorrentIndexerProvider.FALLBACK_MAX_INDEXERS);
+    const settled: PromiseSettledResult<TorrentLike[]>[] = [];
+
+    for (let i = 0; i < selected.length; i += TorrentIndexerProvider.FALLBACK_INDEXER_CONCURRENCY) {
+      const batch = selected.slice(i, i + TorrentIndexerProvider.FALLBACK_INDEXER_CONCURRENCY);
+      const batchSettled = await Promise.allSettled(
+        batch.map((name) =>
+          this.fetchSingleIndexerSearch(
+            name,
+            query,
+            TorrentIndexerProvider.FALLBACK_PER_INDEXER_LIMIT,
+          ),
+        ),
+      );
+      settled.push(...batchSettled);
+    }
+
+    const merged: TorrentLike[] = [];
+    for (const item of settled) {
+      if (item.status === 'fulfilled' && item.value.length > 0) {
+        merged.push(...item.value);
+      }
+    }
+
+    return merged;
+  }
+
+  private async fetchIndexerNames(): Promise<string[]> {
+    const cached = TorrentIndexerProvider.indexerNamesCache;
+    if (
+      cached &&
+      Date.now() - cached.ts < TorrentIndexerProvider.INDEXER_NAMES_CACHE_TTL_MS &&
+      cached.names.length > 0
+    ) {
+      return cached.names;
+    }
+
+    const url = `${this.baseUrl}/sources`;
+    try {
+      const response = await request(url, {
+        signal: AbortSignal.timeout(7000),
+        headers: { Accept: 'application/json' },
+      });
+      if (response.statusCode >= 400) {
+        return [];
+      }
+
+      const payload = (await response.body.json()) as Record<string, unknown>;
+      const names = payload?.indexer_names;
+      if (!Array.isArray(names)) {
+        return [];
+      }
+
+      const parsedNames = names.filter((name): name is string => typeof name === 'string' && name.length > 0);
+      TorrentIndexerProvider.indexerNamesCache = {
+        ts: Date.now(),
+        names: parsedNames,
+      };
+      return parsedNames;
+    } catch {
+      return [];
+    }
+  }
+
+  private getSearchCacheKey(query: string): string {
+    return `${this.baseUrl}|${query.trim().toLowerCase()}`;
+  }
+
+  private async fetchSingleIndexerSearch(
+    indexerName: string,
+    query: string,
+    limit: number,
+  ): Promise<TorrentLike[]> {
+    const url = new URL(`${this.baseUrl}/indexers/${encodeURIComponent(indexerName)}`);
+    url.searchParams.set('q', query);
+    url.searchParams.set('limit', String(limit));
+
+    try {
+      const response = await request(url.toString(), {
+        signal: AbortSignal.timeout(7000),
+        headers: { Accept: 'application/json' },
       });
       if (response.statusCode >= 400) {
         return [];

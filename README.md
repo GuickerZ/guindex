@@ -129,6 +129,12 @@ npm start
 | `BASE_URL` | **Sim** (prod) | URL publica da sua instancia |
 | `LOG_LEVEL` | Nao | `debug`, `info`, `warn`, `error` |
 | `TORRENT_INDEXER_URL` | Nao | URL do torrent-indexer (padrao: instancia publica) |
+| `TORRENT_INDEXER_ENABLE_FALLBACK` | Nao | Ativa fallback para `/indexers/{nome}` quando `/search` vier vazio (`true`/`false`) |
+| `TORRENT_INDEXER_SEARCH_CACHE_TTL_MS` | Nao | TTL do cache de busca em memoria (padrao: `120000`) |
+| `TORRENT_INDEXER_INDEXERS_CACHE_TTL_MS` | Nao | TTL do cache da lista de indexers de `/sources` (padrao: `600000`) |
+| `TORRENT_INDEXER_FALLBACK_MAX_INDEXERS` | Nao | Maximo de indexers usados no fallback (padrao: `7`) |
+| `TORRENT_INDEXER_FALLBACK_PER_INDEXER_LIMIT` | Nao | Limite de resultados por indexer no fallback (padrao: `12`) |
+| `TORRENT_INDEXER_FALLBACK_CONCURRENCY` | Nao | Concurrency de consultas de fallback (padrao: `3`) |
 | `TORBOX_WAIT_VIDEO_URL` | Nao | Video de espera enquanto TorBox processa |
 | `TORBOX_STREAM_LIMIT` | Nao | Limite de streams TorBox (padrao: `15`) |
 
