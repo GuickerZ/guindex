@@ -358,7 +358,7 @@ export class ConfigController {
     <form id="configForm">
       <div class="form-group">
         <label for="provider">PROVEDOR DEBRID</label>
-        <select id="provider">
+        <select id="provider" onchange="onProviderChange()">
           <option value="torbox" ${provider === 'torbox' ? 'selected' : ''}>TorBox</option>
           <option value="realdebrid" ${provider === 'realdebrid' ? 'selected' : ''}>Real-Debrid</option>
         </select>
@@ -378,7 +378,7 @@ export class ConfigController {
       </div>
 
       <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 12px;">
-        <button type="button" id="installBtn" class="btn">Instalar Addon</button>
+        <button type="button" id="installBtn" class="btn" onclick="openInstallModal()">Instalar Addon</button>
         <div class="helper" style="text-align:center">As opcoes de instalacao aparecem no modal.</div>
       </div>
     </form>
@@ -439,143 +439,171 @@ export class ConfigController {
   <div class="toast" id="toast"></div>
 
   <script>
-    (function() {
-      var baseUrl = '${baseUrl}';
-      var provEl = document.getElementById('provider');
-      var rdGroup = document.getElementById('rdGroup');
-      var tbGroup = document.getElementById('tbGroup');
-      var installBtn = document.getElementById('installBtn');
-      var installModal = document.getElementById('installModal');
-      var closeModalBtn = document.getElementById('closeModal');
-      var modalUrlEl = document.getElementById('modalUrl');
-      var installWebLink = document.getElementById('installWebLink');
-      var installQr = document.getElementById('installQr');
-      var modalHint = document.getElementById('modalHint');
-      var openInStremioBtn = document.getElementById('openInStremioBtn');
-      var copyFromModalBtn = document.getElementById('copyFromModalBtn');
+    var baseUrl = '${baseUrl}';
 
-      function toggle() {
-        var tb = provEl.value === 'torbox';
-        rdGroup.style.display = tb ? 'none' : 'block';
-        tbGroup.style.display = tb ? 'block' : 'none';
-        updateAio();
+    function getEls() {
+      return {
+        provEl: document.getElementById('provider'),
+        rdGroup: document.getElementById('rdGroup'),
+        tbGroup: document.getElementById('tbGroup'),
+        rdToken: document.getElementById('rdToken'),
+        tbToken: document.getElementById('tbToken'),
+        installModal: document.getElementById('installModal'),
+        closeModalBtn: document.getElementById('closeModal'),
+        modalUrlEl: document.getElementById('modalUrl'),
+        installWebLink: document.getElementById('installWebLink'),
+        installQr: document.getElementById('installQr'),
+        modalHint: document.getElementById('modalHint'),
+        openInStremioBtn: document.getElementById('openInStremioBtn'),
+        copyFromModalBtn: document.getElementById('copyFromModalBtn'),
+        aioUrl: document.getElementById('aioUrl')
+      };
+    }
+
+    function buildInstallUrl() {
+      var els = getEls();
+      var provider = els.provEl ? els.provEl.value : 'torbox';
+      var rd = els.rdToken ? els.rdToken.value.trim() : '';
+      var tb = els.tbToken ? els.tbToken.value.trim() : '';
+      var token = provider === 'torbox' ? tb : rd;
+      if (!token) {
+        return null;
       }
 
-      function updateAio() {
-        var p = provEl.value;
-        var k = p === 'torbox' ? 'torboxToken' : 'realdebridToken';
-        document.getElementById('aioUrl').textContent =
-          baseUrl + '/manifest.json?debridProvider=' + p + '&' + k + '=TOKEN';
+      var params = new URLSearchParams();
+      params.set('debridProvider', provider);
+      if (provider === 'torbox') {
+        params.set('torboxToken', tb);
+      } else {
+        params.set('realdebridToken', rd);
+      }
+      return baseUrl + '/manifest.json?' + params.toString();
+    }
+
+    function updateAioUrl() {
+      var els = getEls();
+      if (!els.provEl || !els.aioUrl) {
+        return;
+      }
+      var provider = els.provEl.value;
+      var tokenKey = provider === 'torbox' ? 'torboxToken' : 'realdebridToken';
+      els.aioUrl.textContent = baseUrl + '/manifest.json?debridProvider=' + provider + '&' + tokenKey + '=TOKEN';
+    }
+
+    function applyProviderUi() {
+      var els = getEls();
+      if (!els.provEl || !els.rdGroup || !els.tbGroup) {
+        return;
+      }
+      var isTorBox = els.provEl.value === 'torbox';
+      els.rdGroup.style.display = isTorBox ? 'none' : 'block';
+      els.tbGroup.style.display = isTorBox ? 'block' : 'none';
+      updateAioUrl();
+    }
+
+    function onProviderChange() {
+      applyProviderUi();
+    }
+
+    function openInstallModal() {
+      var els = getEls();
+      if (!els.installModal || !els.modalUrlEl || !els.installWebLink || !els.installQr || !els.modalHint || !els.provEl) {
+        return;
       }
 
-      provEl.addEventListener('change', toggle);
-      toggle();
-
-      function buildUrl() {
-        var prov = provEl.value;
-        var rd = document.getElementById('rdToken').value.trim();
-        var tb = document.getElementById('tbToken').value.trim();
-        var token = prov === 'torbox' ? tb : rd;
-        if (!token) { return null; }
-
-        var params = new URLSearchParams();
-        params.set('debridProvider', prov);
-        if (prov === 'torbox') {
-          params.set('torboxToken', tb);
-        } else {
-          params.set('realdebridToken', rd);
-        }
-        return baseUrl + '/manifest.json?' + params.toString();
+      var url = buildInstallUrl();
+      if (url) {
+        els.modalUrlEl.textContent = url;
+        els.installWebLink.href = 'https://web.stremio.com/#/addons?addon=' + encodeURIComponent(url);
+        els.installWebLink.style.pointerEvents = 'auto';
+        els.installWebLink.style.opacity = '1';
+        els.installQr.style.display = 'block';
+        els.installQr.src = 'https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=' + encodeURIComponent(url);
+        els.modalHint.textContent = '';
+      } else {
+        var tokenLabel = els.provEl.value === 'torbox' ? 'TorBox' : 'Real-Debrid';
+        els.modalUrlEl.textContent = 'Preencha o token de ' + tokenLabel + ' para gerar o link de instalacao.';
+        els.installWebLink.href = '#';
+        els.installWebLink.style.pointerEvents = 'none';
+        els.installWebLink.style.opacity = '0.55';
+        els.installQr.style.display = 'none';
+        els.installQr.removeAttribute('src');
+        els.modalHint.textContent = 'Defina o token e clique novamente em "Abrir no Stremio" ou "Copiar URL de instalacao".';
       }
 
-      function toStremioProtocol(url) {
-        return 'stremio://' + url.replace(/^https?:\/\//i, '');
+      els.installModal.classList.add('show');
+      els.installModal.setAttribute('aria-hidden', 'false');
+    }
+
+    function closeInstallModal() {
+      var els = getEls();
+      if (!els.installModal) {
+        return;
+      }
+      els.installModal.classList.remove('show');
+      els.installModal.setAttribute('aria-hidden', 'true');
+    }
+
+    function openInStremio() {
+      var url = buildInstallUrl();
+      if (!url) {
+        alert('Preencha o token do provedor selecionado antes de instalar.');
+        return;
       }
 
-      function updateInstallState() {
-        // Botao principal sempre abre o modal; validacao acontece nas acoes internas.
-        installBtn.disabled = false;
+      if (!confirm('Deseja abrir no app Stremio agora?')) {
+        return;
       }
 
-      function openModal() {
-        var url = buildUrl();
-        if (url) {
-          modalUrlEl.textContent = url;
-          installWebLink.href = 'https://web.stremio.com/#/addons?addon=' + encodeURIComponent(url);
-          installWebLink.style.pointerEvents = 'auto';
-          installWebLink.style.opacity = '1';
-          installQr.style.display = 'block';
-          installQr.src = 'https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=' + encodeURIComponent(url);
-          modalHint.textContent = '';
-        } else {
-          var tokenLabel = provEl.value === 'torbox' ? 'TorBox' : 'Real-Debrid';
-          modalUrlEl.textContent = 'Preencha o token de ' + tokenLabel + ' para gerar o link de instalacao.';
-          installWebLink.href = '#';
-          installWebLink.style.pointerEvents = 'none';
-          installWebLink.style.opacity = '0.55';
-          installQr.style.display = 'none';
-          installQr.removeAttribute('src');
-          modalHint.textContent = 'Defina o token e clique novamente em "Abrir no Stremio" ou "Copiar URL de instalacao".';
-        }
+      window.location.href = 'stremio://' + url.replace(/^https?:\/\//i, '');
+      setTimeout(function() {
+        showToast('Se o app nao abriu, use "Copiar URL de instalacao" no modal.');
+      }, 1200);
+    }
 
-        installModal.classList.add('show');
-        installModal.setAttribute('aria-hidden', 'false');
+    function copyInstallUrlFromModal() {
+      var url = buildInstallUrl();
+      if (!url) {
+        alert('Preencha o token do provedor selecionado antes de copiar a URL.');
+        return;
       }
 
-      function closeModal() {
-        installModal.classList.remove('show');
-        installModal.setAttribute('aria-hidden', 'true');
+      navigator.clipboard.writeText(url).then(function() {
+        showToast('URL de instalacao copiada!');
+      }).catch(function() {
+        prompt('Copie esta URL e cole no Stremio:', url);
+      });
+    }
+
+    (function initConfigPage() {
+      var els = getEls();
+      if (!els.provEl || !els.rdToken || !els.tbToken || !els.closeModalBtn || !els.openInStremioBtn || !els.copyFromModalBtn) {
+        return;
       }
 
-      function openInStremio() {
-        var url = buildUrl();
-        if (!url) {
-          alert('Preencha o token do provedor selecionado antes de instalar.');
-          return;
-        }
+      applyProviderUi();
 
-        var wantsToOpen = confirm('Deseja abrir no app Stremio agora?');
-        if (!wantsToOpen) {
-          return;
-        }
+      els.provEl.addEventListener('change', applyProviderUi);
+      els.rdToken.addEventListener('input', updateAioUrl);
+      els.tbToken.addEventListener('input', updateAioUrl);
 
-        var stremioUrl = toStremioProtocol(url);
-        window.location.href = stremioUrl;
+      els.closeModalBtn.addEventListener('click', closeInstallModal);
+      els.openInStremioBtn.addEventListener('click', openInStremio);
+      els.copyFromModalBtn.addEventListener('click', copyInstallUrlFromModal);
 
-        setTimeout(function() {
-          showToast('Se o app nao abriu, use "Copiar URL de instalacao" no modal.');
-        }, 1200);
-      }
-
-      installBtn.addEventListener('click', openModal);
-
-      openInStremioBtn.addEventListener('click', openInStremio);
-      copyFromModalBtn.addEventListener('click', function() {
-        var url = buildUrl();
-        if (!url) { return; }
-        navigator.clipboard.writeText(url).then(function() {
-          showToast('URL de instalacao copiada!');
-        }).catch(function() {
-          prompt('Copie esta URL e cole no Stremio:', url);
+      if (els.installModal) {
+        els.installModal.addEventListener('click', function(e) {
+          if (e.target === els.installModal) {
+            closeInstallModal();
+          }
         });
-      });
+      }
 
-      closeModalBtn.addEventListener('click', closeModal);
-      installModal.addEventListener('click', function(e) {
-        if (e.target === installModal) {
-          closeModal();
-        }
-      });
       document.addEventListener('keydown', function(e) {
-        if (e.key === 'Escape' && installModal.classList.contains('show')) {
-          closeModal();
+        if (e.key === 'Escape') {
+          closeInstallModal();
         }
       });
-
-      document.getElementById('provider').addEventListener('change', updateInstallState);
-      document.getElementById('rdToken').addEventListener('input', updateInstallState);
-      document.getElementById('tbToken').addEventListener('input', updateInstallState);
-      updateInstallState();
     })();
 
     function copyAio() {
