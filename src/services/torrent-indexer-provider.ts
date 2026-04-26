@@ -49,7 +49,7 @@ interface IndexedTorrentFile {
 
 const MAX_STREAMS = 60;
 const EPISODIC_HINT_REGEX =
-  /(S[0-9]{1,3}(E[0-9]{1,3})?|S[0-9]{1,3}[._ -]?(19|20)[0-9]{2}|[0-9]+x[0-9]+|temporadas?|season|seasons|temp\.?\s*\d|epis[oó]dios?|epis[oó]dio|episode|episodes|serie|série|séries|series|minissérie|mini[\s-]?s[eé]rie|ep\.?\s*[0-9]+|cap[ií]tulo|capitulo|cap\.?\s*[0-9]+|completa|completo|complete|collection|cole[çc][aã]o|box\s*set|pack|integral|[0-9]+[ªºa]\s*temp)/i;
+  /(S[0-9]{1,3}(E[0-9]{1,3})?|S[0-9]{1,3}[._ -]?(19|20)[0-9]{2}|[0-9]+[x×][0-9]+|temporadas?|season|seasons|temp\.?\s*\d|epis[oó]dios?|epis[oó]dio|episode|episodes|serie|série|séries|series|minissérie|mini[\s-]?s[eé]rie|ep\.?\s*[0-9]+|cap[ií]tulo|capitulo|cap\.?\s*[0-9]+|completa|completo|complete|collection|cole[çc][aã]o|box\s*set|pack|integral|[0-9]+[ªºa]\s*temp)/i;
 
 const LANGUAGE_FLAG_MAP: Record<string, string> = {
   portugues: '🇧🇷',
@@ -918,8 +918,8 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
   private static readonly SEASON_PATTERNS: { regex: RegExp; group: number }[] = [
     // S01E03, S01, S1
     { regex: /\bS(\d{1,3})(?:E\d{1,3})?\b/i, group: 1 },
-    // 1x03, 01x03
-    { regex: /\b(\d{1,2})x\d{1,3}\b/i, group: 1 },
+    // 1x03, 01x03, 1×03 (multiplication sign)
+    { regex: /\b(\d{1,2})[x×]\d{1,3}\b/i, group: 1 },
     // Portuguese ordinals: 2ª Temporada, 3a Temporada, 4º Temporada, 1ᵃ Temporada
     { regex: /(\d{1,3})[ªºᵃᵒaAoO]\s*temporada/i, group: 1 },
     // Temporada 2, Season 3
@@ -970,8 +970,8 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
   private static readonly EPISODE_PATTERNS: { regex: RegExp; group: number }[] = [
     // S01E03, S1E3
     { regex: /\bS\d{1,3}E(\d{1,3})\b/i, group: 1 },
-    // 1x03, 01x03
-    { regex: /\b\d{1,2}x(\d{1,3})\b/i, group: 1 },
+    // 1x03, 01x03, 1×03 (multiplication sign)
+    { regex: /\b\d{1,2}[x×](\d{1,3})\b/i, group: 1 },
     // EP03, Ep.03, Ep 03, EP.03, ep03
     { regex: /\bep\.?\s*(\d{1,3})\b/i, group: 1 },
     // E03 standalone (not part of SxxExx — that's caught above)
@@ -984,6 +984,13 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     { regex: /\bfolge\s*(\d{1,3})\b/i, group: 1 },
     // #03 (hash notation)
     { regex: /#(\d{1,3})\b/, group: 1 },
+    // Bare number at start of filename: "2 - Sick.mp4", "02.Title.mp4", "02 Title.mkv"
+    // Only matches when the number is at the beginning of a path segment (after / \ or start)
+    { regex: /(?:^|[\/\\])0*(\d{1,3})\s*[-._\s]+[A-Za-z]/, group: 1 },
+    // Bare number followed by dot-extension: "02.mp4", "2.mkv" (last resort)
+    { regex: /(?:^|[\/\\])0*(\d{1,3})\.(mkv|mp4|avi|m4v|ts)$/i, group: 1 },
+    // Three-digit compact: 302 = S03E02 (when context season is known, extract last 2 digits)
+    { regex: /(?:^|[\/\\])\d(\d{2})\s*[-._\s]+[A-Za-z]/, group: 1 },
   ];
 
   /**
@@ -1360,7 +1367,7 @@ private mapTorrentToStream(
   const stream: SourceStream = {
     name: nameLines.join('\n'),
     title: titleLines.join('\n'),
-    fileName: selectedFileName || displayTitle || this.extractFileName(torrent),
+    fileName: this.buildStreamFileName(selectedFileName, rawTitle, displayTitle, torrent),
     source: sourceLabel,
     magnet,
     cached: false
@@ -1445,6 +1452,44 @@ private mapTorrentToStream(
   return stream;
 }
 
+  /**
+   * Build a proper folder/file path for AIOStreams display.
+   * When a file was selected from a pack, ensures the path includes a folder prefix
+   * so AIOStreams can show: 📁 Folder Name / 📄 filename.mkv
+   */
+  private buildStreamFileName(
+    selectedFilePath: string | undefined,
+    rawTorrentTitle: string,
+    displayTitle: string,
+    torrent: TorrentLike
+  ): string {
+    const fallback = displayTitle || this.extractFileName(torrent) || rawTorrentTitle;
+
+    if (!selectedFilePath) {
+      // No file selected from a pack — return clean title (likely a single-file torrent)
+      return fallback;
+    }
+
+    // If the path already has a folder prefix (contains / or \), use it as-is
+    if (/[/\\]/.test(selectedFilePath)) {
+      return selectedFilePath;
+    }
+
+    // The file path is just a bare filename (e.g. "2 - Sick.mp4").
+    // Prepend the torrent title as a folder name so AIOStreams shows:
+    //   📁 The Walking Dead 3ª Temporada (2012)
+    //   📄 2 - Sick.mp4
+    const folderName = this.cleanIndexerTitle(rawTorrentTitle)
+      .replace(/\.(mkv|mp4|avi|m4v|ts|m2ts|iso)$/i, '') // remove extension if present
+      .replace(/[<>:"|?*]/g, '') // remove invalid path chars
+      .trim();
+
+    if (folderName) {
+      return `${folderName}/${selectedFilePath}`;
+    }
+
+    return selectedFilePath;
+  }
 
   private buildDisplayTitle(torrent: TorrentLike, fallbackTitle: string): string {
     let title = fallbackTitle;
