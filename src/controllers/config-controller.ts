@@ -33,10 +33,7 @@ export class ConfigController {
           type: 'select',
           title: 'Provedor Debrid',
           description: 'Escolha qual provedor premium sera usado para reproducao.',
-          options: [
-            { value: 'realdebrid', label: 'Real-Debrid' },
-            { value: 'torbox', label: 'TorBox' }
-          ],
+          options: ['realdebrid', 'torbox'],
           default: 'realdebrid'
         },
         {

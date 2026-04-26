@@ -32,7 +32,7 @@ export interface AddonManifest {
     type: string;
     title: string;
     description: string;
-    options?: Array<{ value: string; label: string }>;
+    options?: string[];
     default?: string;
   }>;
 }
