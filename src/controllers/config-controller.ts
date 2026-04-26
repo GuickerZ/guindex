@@ -378,9 +378,8 @@ export class ConfigController {
       </div>
 
       <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 12px;">
-        <button type="button" id="installBtn" class="btn">Instalar no App (Windows/Android)</button>
-        <button type="button" id="installWebBtn" class="btn" style="background: var(--surface-2); color: var(--text); border: 1px solid var(--border);">Instalar no Stremio Web</button>
-        <button type="button" id="copyBtn" class="btn" style="background: var(--surface-2); color: var(--text); border: 1px solid var(--border);">Copiar URL (Outros dispositivos)</button>
+        <button type="button" id="installBtn" class="btn">Instalar Addon</button>
+        <div class="helper" style="text-align:center">As opcoes de instalacao aparecem no modal.</div>
       </div>
     </form>
 
@@ -445,7 +444,6 @@ export class ConfigController {
       var rdGroup = document.getElementById('rdGroup');
       var tbGroup = document.getElementById('tbGroup');
       var installBtn = document.getElementById('installBtn');
-      var installWebBtn = document.getElementById('installWebBtn');
       var installModal = document.getElementById('installModal');
       var closeModalBtn = document.getElementById('closeModal');
       var modalUrlEl = document.getElementById('modalUrl');
@@ -480,8 +478,11 @@ export class ConfigController {
 
         var params = new URLSearchParams();
         params.set('debridProvider', prov);
-        if (rd) params.set('realdebridToken', rd);
-        if (tb) params.set('torboxToken', tb);
+        if (prov === 'torbox') {
+          params.set('torboxToken', tb);
+        } else {
+          params.set('realdebridToken', rd);
+        }
         return baseUrl + '/manifest.json?' + params.toString();
       }
 
@@ -492,7 +493,6 @@ export class ConfigController {
       function updateInstallState() {
         var url = buildUrl();
         installBtn.disabled = !url;
-        installWebBtn.disabled = !url;
       }
 
       function openModal() {
@@ -522,6 +522,11 @@ export class ConfigController {
           return;
         }
 
+        var wantsToOpen = confirm('Deseja abrir no app Stremio agora?');
+        if (!wantsToOpen) {
+          return;
+        }
+
         var stremioUrl = toStremioProtocol(url);
         window.location.href = stremioUrl;
 
@@ -531,14 +536,6 @@ export class ConfigController {
       }
 
       installBtn.addEventListener('click', openModal);
-      installWebBtn.addEventListener('click', function() {
-        var url = buildUrl();
-        if (!url) {
-          alert('Preencha o token do provedor selecionado antes de instalar.');
-          return;
-        }
-        window.open('https://web.stremio.com/#/addons?addon=' + encodeURIComponent(url), '_blank', 'noopener,noreferrer');
-      });
 
       openInStremioBtn.addEventListener('click', openInStremio);
       copyFromModalBtn.addEventListener('click', function() {
@@ -567,20 +564,6 @@ export class ConfigController {
       document.getElementById('rdToken').addEventListener('input', updateInstallState);
       document.getElementById('tbToken').addEventListener('input', updateInstallState);
       updateInstallState();
-
-      document.getElementById('copyBtn').addEventListener('click', function(e) {
-        e.preventDefault();
-        var url = buildUrl();
-        if (!url) {
-          alert('Preencha o token do provedor selecionado antes de copiar a URL.');
-          return;
-        }
-        navigator.clipboard.writeText(url).then(function() {
-          showToast('URL copiada! Cole no Stremio para instalar.');
-        }).catch(function() {
-          prompt('Copie esta URL e cole no Stremio:', url);
-        });
-      });
     })();
 
     function copyAio() {
