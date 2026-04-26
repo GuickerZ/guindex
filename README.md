@@ -59,14 +59,14 @@ Stremio -> GuIndex -> torrent-indexer -> sites brasileiros de torrent
   <a href="https://github.com/felipemarinho97/torrent-indexer"><img src="https://img.shields.io/github/stars/felipemarinho97/torrent-indexer?style=for-the-badge&color=f59e0b&labelColor=111118&label=torrent-indexer%20stars" alt="torrent-indexer stars"></a>
 </p>
 
-O GuIndex ja vem configurado com uma instancia propria do torrent-indexer hospedada no Render. Se voce quiser hospedar a sua:
+O GuIndex ja vem configurado com uma instancia propria do torrent-indexer. Se voce quiser hospedar a sua:
 
 ```bash
-# Docker
-docker run -p 8080:8080 ghcr.io/felipemarinho97/torrent-indexer:latest
+# Docker (porta interna: 7006)
+docker run -d -p 8090:7006 --restart unless-stopped ghcr.io/felipemarinho97/torrent-indexer:latest
 
 # Configure no .env do GuIndex:
-TORRENT_INDEXER_URL=http://localhost:8080
+TORRENT_INDEXER_URL=http://localhost:8090
 ```
 
 Opcoes de hosting: **Render** (free tier), **Railway**, **Fly.io**, ou qualquer VPS com Docker.

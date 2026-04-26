@@ -8,10 +8,10 @@ import type { BaseSourceProvider } from '../services/base-source-provider.js';
 
 const TORRENT_INDEXER_BASE_URL =
   process.env.TORRENT_INDEXER_URL ||
-  'https://torrent-indexer-latest.onrender.com';
+  'http://guindex.duckdns.org:8090';
 
 if (!process.env.TORRENT_INDEXER_URL) {
-  console.log('[GuIndex] Usando instancia padrao do torrent-indexer: https://torrent-indexer-latest.onrender.com');
+  console.log('[GuIndex] Usando instancia padrao do torrent-indexer: http://guindex.duckdns.org:8090');
 }
 
 export const SOURCES: BaseSourceProvider[] = [
