@@ -49,7 +49,7 @@ interface IndexedTorrentFile {
 
 const MAX_STREAMS = 60;
 const EPISODIC_HINT_REGEX =
-  /(S[0-9]{1,3}(E[0-9]{1,3})?|S[0-9]{1,3}[._ -]?(19|20)[0-9]{2}|[0-9]+x[0-9]+|temporadas?|season|epis[oó]dios?|epis[oó]dio|episode|serie|série|minissérie|mini[\s-]?serie|ep[0-9]+|cap[ií]tulo|capitulo|completa|complete|collection|box\s*set|pack)/i;
+  /(S[0-9]{1,3}(E[0-9]{1,3})?|S[0-9]{1,3}[._ -]?(19|20)[0-9]{2}|[0-9]+x[0-9]+|temporadas?|season|seasons|temp\.?\s*\d|epis[oó]dios?|epis[oó]dio|episode|episodes|serie|série|séries|series|minissérie|mini[\s-]?s[eé]rie|ep\.?\s*[0-9]+|cap[ií]tulo|capitulo|cap\.?\s*[0-9]+|completa|completo|complete|collection|cole[çc][aã]o|box\s*set|pack|integral|[0-9]+[ªºa]\s*temp)/i;
 
 const LANGUAGE_FLAG_MAP: Record<string, string> = {
   portugues: '🇧🇷',
@@ -225,6 +225,10 @@ const LANGUAGE_ALIASES: Record<string, string> = {
   farsi: 'Persian',
   latin: 'Latin',
   latim: 'Latin',
+  nacional: 'Portuguese',
+  'audio nacional': 'Portuguese',
+  dub: 'Portuguese',
+  'audio original': 'English',
 };
 
 interface MatchContext {
@@ -237,6 +241,10 @@ interface MatchContext {
 
 export class TorrentIndexerProvider extends BaseSourceProvider {
   private readonly baseUrl: string;
+
+  /** In-memory Cinemeta cache (shared across instances) */
+  private static cinemetaCache = new Map<string, { data: CinemetaMeta; ts: number }>();
+  private static readonly CINEMETA_TTL = 5 * 60 * 1000; // 5 min
 
   constructor(name: string, baseUrl: string) {
     super(name);
@@ -270,7 +278,18 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     if (imdbQuery) {
       queries.push(imdbQuery);
     }
-    if (textQuery && textQuery !== imdbQuery) {
+    // For series, add an S-code query (e.g. "Better Call Saul S02E01") which
+    // tends to return better results from Brazilian indexers than the textual form.
+    if (type.toLowerCase() !== 'movie' && parsed.season !== undefined && targetTitle) {
+      const sPad = String(parsed.season).padStart(2, '0');
+      const eCode = parsed.episode !== undefined
+        ? `E${String(parsed.episode).padStart(2, '0')}` : '';
+      const sCodeQuery = `${targetTitle} S${sPad}${eCode}`;
+      if (!queries.includes(sCodeQuery)) {
+        queries.push(sCodeQuery);
+      }
+    }
+    if (textQuery && !queries.includes(textQuery)) {
       queries.push(textQuery);
     }
 
@@ -331,17 +350,18 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
   }
 
   private getDedupeKey(stream: SourceStream): string | undefined {
+    let base: string | undefined;
     if (stream.infoHash) {
-      return stream.infoHash.toLowerCase();
-    }
-    if (stream.magnet) {
+      base = stream.infoHash.toLowerCase();
+    } else if (stream.magnet) {
       const infoHash = this.extractInfoHash(stream.magnet);
-      if (infoHash) {
-        return infoHash.toLowerCase();
-      }
-      return stream.magnet;
+      base = infoHash ? infoHash.toLowerCase() : stream.magnet;
     }
-    return undefined;
+    if (!base) return undefined;
+    // Include fileIdx so different episodes from the same torrent pack aren't deduplicated
+    return stream.fileIdx !== undefined && stream.fileIdx >= 0
+      ? `${base}:${stream.fileIdx}`
+      : base;
   }
 
   private async decorateWithDebrid(
@@ -481,7 +501,10 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     url.searchParams.set('q', query);
 
     try {
-      const response = await request(url.toString());
+      const response = await request(url.toString(), {
+        signal: AbortSignal.timeout(8000),
+        headers: { 'Accept': 'application/json' },
+      });
       if (response.statusCode >= 400) {
         return [];
       }
@@ -528,10 +551,18 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
   }
 
   private async fetchCinemetaMeta(type: string, id: string): Promise<CinemetaMeta | undefined> {
+    const cacheKey = `${type}:${id}`;
+    const cached = TorrentIndexerProvider.cinemetaCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < TorrentIndexerProvider.CINEMETA_TTL) {
+      return cached.data;
+    }
+
     const url = `https://v3-cinemeta.strem.io/meta/${encodeURIComponent(type)}/${encodeURIComponent(id)}.json`;
 
     try {
-      const response = await request(url);
+      const response = await request(url, {
+        signal: AbortSignal.timeout(5000),
+      });
       if (response.statusCode >= 400) {
         return undefined;
       }
@@ -539,7 +570,9 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       const payload = (await response.body.json()) as Record<string, unknown>;
       const meta = payload?.meta ?? payload;
       if (meta && typeof meta === 'object') {
-        return meta as CinemetaMeta;
+        const result = meta as CinemetaMeta;
+        TorrentIndexerProvider.cinemetaCache.set(cacheKey, { data: result, ts: Date.now() });
+        return result;
       }
     } catch {
       // Ignore Cinemeta errors
@@ -610,7 +643,6 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
         }
       }
     } else if (imdb.toLowerCase() !== parsed.imdbId.toLowerCase()) {
-      // IMDB mismatch
       return false;
     }
 
@@ -618,7 +650,6 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       if (this.hasEpisodePattern(torrent)) {
         return false;
       }
-
       if (releaseYear !== undefined) {
         const torrentYear = this.extractYear(torrent);
         if (torrentYear !== undefined && Math.abs(torrentYear - releaseYear) > 1) {
@@ -629,19 +660,47 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
     // Season/episode filtering — applies to ALL series results (including IMDB matches)
     if (normalizedType !== 'movie' && parsed.season !== undefined) {
-      const torrentSeason = this.extractSeasonFromTorrent(torrent);
-      if (torrentSeason !== undefined && torrentSeason !== parsed.season) {
-        return false;
+      const texts = this.collectSearchableTexts(torrent);
+
+      // Allow complete-series packs for any season
+      if (this.isCompleteSeriesPack(texts)) {
+        // falls through — don't filter by season
+      } else {
+        // Check for season ranges first (e.g. "1ª a 5ª Temporada")
+        const range = this.extractSeasonRangeFromTexts(texts);
+        if (range) {
+          if (parsed.season < range.start || parsed.season > range.end) {
+            return false;
+          }
+        } else {
+          // Single season check
+          const torrentSeason = this.extractSeasonFromTorrent(torrent);
+          if (torrentSeason !== undefined && torrentSeason !== parsed.season) {
+            return false;
+          }
+
+          // When torrentSeason is undefined, inspect internal files
+          if (torrentSeason === undefined) {
+            const files = this.extractFilesFromTorrent(torrent);
+            if (files.length > 0) {
+              const fileSeasonsSet = new Set<number>();
+              for (const file of files) {
+                const fs = this.extractSeasonFromTorrent({ title: file.path });
+                if (fs !== undefined) fileSeasonsSet.add(fs);
+              }
+              if (fileSeasonsSet.size > 0 && !fileSeasonsSet.has(parsed.season)) {
+                return false;
+              }
+            }
+          }
+        }
       }
 
       if (parsed.episode !== undefined) {
         const torrentEpisode = this.extractEpisodeFromTorrent(torrent);
-        // If torrent has a specific episode and it doesn't match, reject.
-        // But if torrentEpisode is undefined, it might be a season pack — allow it.
         if (torrentEpisode !== undefined && torrentEpisode !== parsed.episode) {
           return false;
         }
-
         const episodeList = this.extractEpisodeList(torrent);
         if (episodeList && episodeList.length > 0 && !episodeList.includes(parsed.episode)) {
           return false;
@@ -720,19 +779,22 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
   private extractImdb(torrent: TorrentLike): string | undefined {
     const record = torrent as Record<string, unknown>;
-    const imdb =
-      this.toString(record.imdb) ||
-      this.toString(record.imdbId) ||
-      this.toString(record.imdb_id) ||
-      this.toString(record['Imdb']) ||
-      this.toString(record['IMDB']);
+    const candidates = [
+      this.toString(record.imdb),
+      this.toString(record.imdbId),
+      this.toString(record.imdb_id),
+      this.toString(record['Imdb']),
+      this.toString(record['IMDB']),
+    ];
 
-    if (imdb && /^tt\d+$/.test(imdb)) {
-      return imdb;
-    }
-
-    if (typeof imdb === 'string') {
-      const match = imdb.match(/tt\d+/);
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      // Bare IMDB ID
+      if (/^tt\d+$/.test(candidate)) {
+        return candidate;
+      }
+      // IMDB URL or string containing an ID
+      const match = candidate.match(/tt\d+/);
       if (match) {
         return match[0];
       }
@@ -786,6 +848,19 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       }
     }
 
+    // Fallback: extract year from title/original_title when structured field is empty
+    const texts = this.collectSearchableTexts(torrent);
+    for (const text of texts) {
+      if (!text) continue;
+      // Match (2017) or [2017] or .2017. patterns — only years 1950-2099
+      const yearMatch = text.match(/[\(\[.\s]((?:19[5-9]\d|20[0-9]\d))[\)\].\s]/)
+        ?? text.match(/\b((?:19[5-9]\d|20[0-9]\d))\b/);
+      if (yearMatch?.[1]) {
+        const y = Number(yearMatch[1]);
+        if (y >= 1950 && y <= 2099) return y;
+      }
+    }
+
     return undefined;
   }
 
@@ -814,69 +889,177 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
   }
 
   /**
-   * Extract season number from torrent: first from structured fields, then from title text.
-   * This is critical because the torrent-indexer does NOT return structured season/episode fields.
+   * Collect ALL text fields from a torrent that might contain season/episode/title info.
+   * Used as the basis for all extraction to ensure nothing is missed.
+   */
+  private collectSearchableTexts(torrent: TorrentLike): string[] {
+    const record = torrent as Record<string, unknown>;
+    const texts: string[] = [];
+    const add = (v: unknown) => { if (typeof v === 'string' && v.trim()) texts.push(v.trim()); };
+    add(record.title);
+    add(record.original_title);
+    add(record.name);
+    add(record.filename);
+    add(record.release);
+    add(record.file);
+    add(record.slug);
+    add(record.displayName);
+    add(record.description);
+    add(record.summary);
+    add(record.details);
+    add(record.category);
+    add(record.subcategory);
+    const tags = record.tags ?? record.categories;
+    if (Array.isArray(tags)) tags.forEach(add);
+    return texts;
+  }
+
+  // ── Season extraction patterns (ordered by specificity) ──────────────────
+  private static readonly SEASON_PATTERNS: { regex: RegExp; group: number }[] = [
+    // S01E03, S01, S1
+    { regex: /\bS(\d{1,3})(?:E\d{1,3})?\b/i, group: 1 },
+    // 1x03, 01x03
+    { regex: /\b(\d{1,2})x\d{1,3}\b/i, group: 1 },
+    // Portuguese ordinals: 2ª Temporada, 3a Temporada, 4º Temporada, 1ᵃ Temporada
+    { regex: /(\d{1,3})[ªºᵃᵒaAoO]\s*temporada/i, group: 1 },
+    // Temporada 2, Season 3
+    { regex: /\b(?:temporada|season)\s*(\d{1,3})\b/i, group: 1 },
+    // Temp 1, Temp. 2, Temp.3
+    { regex: /\btemp\.?\s*(\d{1,3})\b/i, group: 1 },
+    // Portuguese ordinals with temp: 2ª Temp, 3a temp
+    { regex: /(\d{1,3})[ªºᵃᵒaAoO]\s*temp\b/i, group: 1 },
+    // T01 or T1 (only when preceded by non-alpha to avoid matching words)
+    { regex: /(?:^|[\s._\-\[\(])T(\d{1,2})(?:[\s._\-\]\)]|$)/i, group: 1 },
+    // Pack Temporada 1, Pack Season 1
+    { regex: /\bpack\s+(?:temporada|season|temp\.?)\s*(\d{1,3})\b/i, group: 1 },
+    // "da 3 temporada" (informal Portuguese)
+    { regex: /\bda\s+(\d{1,3})\s*temporada\b/i, group: 1 },
+  ];
+
+  // ── Season RANGE patterns (multi-season packs) ───────────────────────────
+  private static readonly SEASON_RANGE_PATTERNS: { regex: RegExp; startGroup: number; endGroup: number }[] = [
+    // 1ª a 3ª Temporada, 1a a 6a temporada, 1ª à 5ª temporada
+    { regex: /(\d{1,3})[ªºᵃᵒaAoO]?\s*(?:a|à|até|ao|~|-)\s*(\d{1,3})[ªºᵃᵒaAoO]?\s*temporada/i, startGroup: 1, endGroup: 2 },
+    // Temporadas 1-3, Temporadas 1 a 5, Temporadas 1 ao 6, Temporada 1~5
+    { regex: /temporadas?\s*(\d{1,3})\s*(?:a|à|até|ao|~|-|e)\s*(\d{1,3})/i, startGroup: 1, endGroup: 2 },
+    // Season 1-3, Seasons 1 to 5
+    { regex: /seasons?\s*(\d{1,3})\s*(?:to|through|thru|~|-)\s*(\d{1,3})/i, startGroup: 1, endGroup: 2 },
+    // S01-S03, S01~S06, S01.S06
+    { regex: /\bS(\d{1,3})\s*[-~.]\s*S(\d{1,3})\b/i, startGroup: 1, endGroup: 2 },
+    // T01-T03
+    { regex: /\bT(\d{1,2})\s*[-~.]\s*T(\d{1,2})\b/i, startGroup: 1, endGroup: 2 },
+    // Temp 1-3, Temp.1 a 5
+    { regex: /\btemp\.?\s*(\d{1,3})\s*(?:a|à|até|ao|~|-)\s*(\d{1,3})/i, startGroup: 1, endGroup: 2 },
+  ];
+
+  // ── Complete series detection ─────────────────────────────────────────────
+  private static readonly COMPLETE_SERIES_PATTERNS: RegExp[] = [
+    /\b(?:s[eé]rie|series)\s+completa\b/i,
+    /\bcomplete\s+(?:s[eé]rie|series)\b/i,
+    /\btodas?\s+(?:as\s+)?temporadas?\b/i,
+    /\ball\s+seasons?\b/i,
+    /\bcomplete\s+(?:collection|box\s*set|pack)\b/i,
+    /\bcole[çc][ãa]o\s+completa\b/i,
+    /\bpack\s+completo\b/i,
+    /\bintegral\b/i,
+    /\bthe\s+complete\s+series\b/i,
+    /\bdiscografia\s+completa\b/i,
+  ];
+
+  // ── Episode extraction patterns ──────────────────────────────────────────
+  private static readonly EPISODE_PATTERNS: { regex: RegExp; group: number }[] = [
+    // S01E03, S1E3
+    { regex: /\bS\d{1,3}E(\d{1,3})\b/i, group: 1 },
+    // 1x03, 01x03
+    { regex: /\b\d{1,2}x(\d{1,3})\b/i, group: 1 },
+    // EP03, Ep.03, Ep 03, EP.03, ep03
+    { regex: /\bep\.?\s*(\d{1,3})\b/i, group: 1 },
+    // E03 standalone (not part of SxxExx — that's caught above)
+    { regex: /(?<!S\d{0,3})\bE(\d{1,3})\b/i, group: 1 },
+    // Episódio 03, Episodio 03, Episode 03
+    { regex: /\b(?:epis[oó]dio|episodio|episode)\s*(\d{1,3})\b/i, group: 1 },
+    // Capítulo 03, Capitulo 03, Cap 03, Cap.03
+    { regex: /\b(?:cap[ií]tulo|capitulo|cap)\.?\s*(\d{1,3})\b/i, group: 1 },
+    // Folge 03 (German, sometimes seen in multi-lang releases)
+    { regex: /\bfolge\s*(\d{1,3})\b/i, group: 1 },
+    // #03 (hash notation)
+    { regex: /#(\d{1,3})\b/, group: 1 },
+  ];
+
+  /**
+   * Extract season number from torrent using structured fields + comprehensive text parsing.
+   * Searches title, original_title, filename, and other text fields.
    */
   private extractSeasonFromTorrent(torrent: TorrentLike): number | undefined {
-    // Try structured fields first
     const structured = this.extractSeason(torrent);
     if (structured !== undefined) return structured;
 
-    // Parse from title text using S01E03 patterns
-    const title = this.extractTitle(torrent) || '';
-    const match = title.match(/S(\d{1,3})(?:E\d{1,3})?/i);
-    if (match?.[1]) {
-      const season = parseInt(match[1], 10);
-      if (!isNaN(season)) return season;
+    const texts = this.collectSearchableTexts(torrent);
+    for (const text of texts) {
+      if (!text) continue;
+      for (const { regex, group } of TorrentIndexerProvider.SEASON_PATTERNS) {
+        const m = text.match(regex);
+        if (m?.[group]) {
+          const season = parseInt(m[group], 10);
+          if (!isNaN(season) && season > 0 && season < 200) return season;
+        }
+      }
     }
-
-    // Try "1x03" pattern
-    const altMatch = title.match(/(\d{1,2})x(\d{1,3})/i);
-    if (altMatch?.[1]) {
-      const season = parseInt(altMatch[1], 10);
-      if (!isNaN(season)) return season;
-    }
-
-    // Try "Temporada X" / "Season X"
-    const wordMatch = title.match(/(?:temporada|season)\s*(\d{1,3})/i);
-    if (wordMatch?.[1]) {
-      const season = parseInt(wordMatch[1], 10);
-      if (!isNaN(season)) return season;
-    }
-
     return undefined;
   }
 
   /**
-   * Extract episode number from torrent: first from structured fields, then from title text.
+   * Detect multi-season packs like "1ª a 5ª Temporada", "Temporadas 1-6".
+   * Returns { start, end } or undefined.
+   */
+  private extractSeasonRangeFromTexts(texts: string[]): { start: number; end: number } | undefined {
+    for (const text of texts) {
+      if (!text) continue;
+      for (const { regex, startGroup, endGroup } of TorrentIndexerProvider.SEASON_RANGE_PATTERNS) {
+        const m = text.match(regex);
+        if (m?.[startGroup] && m?.[endGroup]) {
+          const start = parseInt(m[startGroup], 10);
+          const end = parseInt(m[endGroup], 10);
+          if (!isNaN(start) && !isNaN(end) && start > 0 && end >= start) {
+            return { start, end };
+          }
+        }
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Detect complete-series packs ("Série Completa", "Todas as Temporadas", etc.).
+   */
+  private isCompleteSeriesPack(texts: string[]): boolean {
+    for (const text of texts) {
+      if (!text) continue;
+      for (const pattern of TorrentIndexerProvider.COMPLETE_SERIES_PATTERNS) {
+        if (pattern.test(text)) return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Extract episode number from torrent using structured fields + comprehensive text parsing.
    */
   private extractEpisodeFromTorrent(torrent: TorrentLike): number | undefined {
-    // Try structured fields first
     const structured = this.extractEpisode(torrent);
     if (structured !== undefined) return structured;
 
-    // Parse from title text using S01E03 pattern
-    const title = this.extractTitle(torrent) || '';
-    const match = title.match(/S\d{1,3}E(\d{1,3})/i);
-    if (match?.[1]) {
-      const episode = parseInt(match[1], 10);
-      if (!isNaN(episode)) return episode;
+    const texts = this.collectSearchableTexts(torrent);
+    for (const text of texts) {
+      if (!text) continue;
+      for (const { regex, group } of TorrentIndexerProvider.EPISODE_PATTERNS) {
+        const m = text.match(regex);
+        if (m?.[group]) {
+          const episode = parseInt(m[group], 10);
+          if (!isNaN(episode) && episode > 0 && episode < 2000) return episode;
+        }
+      }
     }
-
-    // Try "1x03" pattern
-    const altMatch = title.match(/\d{1,2}x(\d{1,3})/i);
-    if (altMatch?.[1]) {
-      const episode = parseInt(altMatch[1], 10);
-      if (!isNaN(episode)) return episode;
-    }
-
-    // Try EP03 / E03 standalone
-    const epMatch = title.match(/\bE(?:P)?(\d{1,3})\b/i);
-    if (epMatch?.[1]) {
-      const episode = parseInt(epMatch[1], 10);
-      if (!isNaN(episode)) return episode;
-    }
-
     return undefined;
   }
 
@@ -926,6 +1109,34 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     };
 
     candidates.forEach(addValue);
+
+    // Auto-detect episode ranges from title like "E01-E10", "EP01-EP10", "Episodio 1 ao 10"
+    if (numbers.size === 0) {
+      const texts = this.collectSearchableTexts(torrent);
+      for (const text of texts) {
+        if (!text) continue;
+        // E01-E10, EP01-EP10, E01~E10
+        const rangeMatch = text.match(/\bE(?:P)?\.?\s*(\d{1,3})\s*[-~]\s*E(?:P)?\.?\s*(\d{1,3})\b/i);
+        if (rangeMatch?.[1] && rangeMatch?.[2]) {
+          const start = parseInt(rangeMatch[1], 10);
+          const end = parseInt(rangeMatch[2], 10);
+          if (!isNaN(start) && !isNaN(end) && start > 0 && end >= start && end - start < 100) {
+            for (let i = start; i <= end; i++) numbers.add(i);
+            break;
+          }
+        }
+        // "Episodio 1 ao 10", "Episódio 1 a 10"
+        const ptRangeMatch = text.match(/\b(?:epis[oó]dio|episodio|cap[ií]tulo|capitulo)\s*(\d{1,3})\s*(?:a|ao|até|~|-)\s*(\d{1,3})\b/i);
+        if (ptRangeMatch?.[1] && ptRangeMatch?.[2]) {
+          const start = parseInt(ptRangeMatch[1], 10);
+          const end = parseInt(ptRangeMatch[2], 10);
+          if (!isNaN(start) && !isNaN(end) && start > 0 && end >= start && end - start < 100) {
+            for (let i = start; i <= end; i++) numbers.add(i);
+            break;
+          }
+        }
+      }
+    }
 
     if (numbers.size === 0) {
       return undefined;
@@ -1067,6 +1278,12 @@ private mapTorrentToStream(
 
   const magnet = this.extractMagnet(torrent);
   if (!magnet) {
+    return undefined;
+  }
+
+  // Reject torrents where the total size is suspiciously small (likely fake/ad)
+  const totalSize = this.extractSize(torrent);
+  if (typeof totalSize === 'number' && totalSize > 0 && totalSize < TorrentIndexerProvider.MIN_VIDEO_SIZE) {
     return undefined;
   }
 
@@ -1267,14 +1484,13 @@ private mapTorrentToStream(
       return undefined;
     }
 
-    if (/^4k$/i.test(trimmed)) {
-      return '4K';
-    }
+    if (/\b(4k|UHD|2160p)\b/i.test(trimmed)) return '4K';
+    if (/\b(FHD|FULLHD)\b/i.test(trimmed)) return '1080p';
+    if (/\bSD\b/i.test(trimmed)) return '480p';
 
     const match = trimmed.match(/(\d{3,4}p)/i);
     if (match?.[1]) {
-      const value = match[1].toLowerCase();
-      return value === '4k' ? '4K' : value;
+      return match[1].toLowerCase();
     }
 
     return trimmed.replace(/\s+/g, ' ');
@@ -1367,6 +1583,8 @@ private mapTorrentToStream(
     return Array.from(languages);
   }
 
+  private static readonly MIN_VIDEO_SIZE = 5 * 1024 * 1024; // 5 MB — anything smaller is junk/ads
+
   private selectBestTorrentFile(torrent: TorrentLike, context: MatchContext): IndexedTorrentFile | undefined {
     const files = this.extractFilesFromTorrent(torrent);
     if (files.length === 0) {
@@ -1380,7 +1598,14 @@ private mapTorrentToStream(
         return (b.file.size ?? 0) - (a.file.size ?? 0);
       });
 
-    return scored[0]?.file;
+    const best = scored[0]?.file;
+
+    // Reject if the best file is too small — likely an ad MP4 or NFO
+    if (best && best.size !== undefined && best.size < TorrentIndexerProvider.MIN_VIDEO_SIZE) {
+      return undefined;
+    }
+
+    return best;
   }
 
   private scoreTorrentFile(file: IndexedTorrentFile, context: MatchContext): number {
@@ -1390,11 +1615,16 @@ private mapTorrentToStream(
 
     // Prefer real video files and penalize common junk files.
     if (this.isVideoPath(file.path)) score += 30;
-    if (/\b(sample|trailer|extras?|bonus|featurette|behindthescenes|creditos|poster|rarbg|nfo|subs?)\b/i.test(file.path)) {
+    if (/\b(sample|trailer|extras?|bonus|featurette|behindthescenes|creditos|poster|rarbg|nfo|subs?|propaganda|anuncio|promo|preview|teaser)\b/i.test(file.path)) {
       score -= 25;
     }
-    if (/\.(txt|url|nfo|jpg|jpeg|png|gif|bmp|ico|md)$/i.test(file.path)) {
+    if (/\.(txt|url|nfo|jpg|jpeg|png|gif|bmp|ico|md|html|htm|exe|bat|lnk|srt|sub|ass|ssa|idx)$/i.test(file.path)) {
       score -= 40;
+    }
+
+    // Penalize tiny files — almost certainly ads, readme, or fake content
+    if (file.size !== undefined && file.size < TorrentIndexerProvider.MIN_VIDEO_SIZE) {
+      score -= 50;
     }
 
     for (const title of context.targetTitles) {
@@ -1436,6 +1666,15 @@ private mapTorrentToStream(
     }
 
     score += Math.log10((file.size ?? 0) + 1);
+
+    // Prefer Portuguese-language files (Dublado > Legendado > unmarked)
+    const lowerPath = file.path.toLowerCase();
+    if (/\b(dublado|dublada|dual|ptbr|pt[\s._-]?br|nacional)\b/i.test(lowerPath)) {
+      score += 8;
+    } else if (/\b(legendado|leg)\b/i.test(lowerPath)) {
+      score += 3;
+    }
+
     return score;
   }
 
@@ -1555,6 +1794,8 @@ private mapTorrentToStream(
   private static readonly SITE_LABEL_MAP: Record<string, string> = {
     'comando.la': 'Comando',
     'comando.to': 'Comando',
+    'comandofilmes.net': 'Comando',
+    'comandotorrents.com': 'Comando',
     'bludv.xyz': 'BluDV',
     'bludv1.xyz': 'BluDV',
     'bludv.org': 'BluDV',
@@ -1573,6 +1814,13 @@ private mapTorrentToStream(
     'torrentmovies.co': 'TorrentMovies',
     'sitedetorrents.com': 'SiteDeTorrents',
     'ytsbr.com': 'YTSBR',
+    'limaotorrent.org': 'LimãoTorrent',
+    'baixarfilmetorrent.net': 'BaixarFilme',
+    'thepiratebay.org': 'TPB',
+    'rarbg.to': 'RARBG',
+    '1337x.to': '1337x',
+    'nyaa.si': 'Nyaa',
+    'yts.mx': 'YTS',
   };
 
   private extractSourceDomain(torrent: TorrentLike): string | undefined {
@@ -1729,18 +1977,22 @@ private mapTorrentToStream(
   private cleanIndexerTitle(title: string): string {
     let cleaned = title;
 
+    // Remove [EVITE.COPIAS...] and similar bracketed spam prefixes
+    cleaned = cleaned.replace(/^\[(?:EVITE|BAIXE|DOWNLOAD|WWW)[^\]]*\]\s*/gi, '');
+
+    // Remove "EVITE.COPIAS.BAIXE.NO." prefix without brackets
+    cleaned = cleaned.replace(/^EVITE\.COPIAS\.[^.]*\./i, '');
+
     // Remove known site prefixes that get concatenated into titles
-    cleaned = cleaned.replace(/^(SITEDETORRENTS\.COM\.?|WWW\.BLUDV\.(COM|TV|IN)\.?|BLUDV\.(COM|TV|IN)\.?|WWW\.THEPIRATEFILMES\.COM\.?|THEPIRATEFILMES\.COM\.?|YTSBR\.COM\.?)/gi, '');
+    cleaned = cleaned.replace(/^(SITEDETORRENTS\.COM\.?|WWW\.BLUDV\.(COM|TV|IN)\.?|BLUDV\.(COM|TV|IN)\.?|WWW\.THEPIRATEFILMES\.COM\.?|THEPIRATEFILMES\.COM\.?|YTSBR\.COM\.?|WWW\.COMANDOTORRENTS\.COM\.?|COMANDOTORRENTS\.COM\.?)/gi, '');
 
     // Remove leading dots/dashes/underscores/spaces
     cleaned = cleaned.replace(/^[.\-_\s]+/, '');
 
     // Brazilian indexer slug pattern: metadata-prefix separated by ".." from the actual title
-    // e.g. "BLURAY-1080P-5.1-VERSAO-ESTENDIDA-MP4.MP4.-LEGENDADO-..The.Lord.of.the.Rings..."
     const doubleDotIdx = cleaned.indexOf('..');
     if (doubleDotIdx > 0) {
       const afterDoubleDot = cleaned.slice(doubleDotIdx).replace(/^\.+/, '');
-      // Only use the part after ".." if it looks like a real title (starts with a letter)
       if (afterDoubleDot && /^[A-Za-z]/.test(afterDoubleDot)) {
         cleaned = afterDoubleDot;
       }
@@ -1752,11 +2004,14 @@ private mapTorrentToStream(
     // Remove trailing file extension for display
     cleaned = cleaned.replace(/\.(mkv|mp4|avi|m4v|ts|m2ts|iso)$/i, '');
 
-    // Remove orphaned parenthetical language tags from the indexer e.g. "(eng)", "(brazilian, eng)"
-    cleaned = cleaned.replace(/\s*\((brazilian|eng|portuguese|portugues|english|spanish|espanhol|dublado|legendado)(?:\s*,\s*(brazilian|eng|portuguese|portugues|english|spanish|espanhol|dublado|legendado))*\)\s*$/i, '');
+    // Remove orphaned parenthetical language tags from the indexer
+    cleaned = cleaned.replace(/\s*\((brazilian|eng|portuguese|portugues|english|spanish|espanhol|dublado|legendado|nacional)(?:\s*,\s*(brazilian|eng|portuguese|portugues|english|spanish|espanhol|dublado|legendado|nacional))*\)\s*$/i, '');
 
     // Clean up ugly slug patterns: .-LEGENDADO-., .-DUBLADO-.
     cleaned = cleaned.replace(/\.-([A-Z]+)-\./g, ' $1 ');
+
+    // Remove trailing site domain junk like "-comando.la" or "-WWW.COMANDOTORRENTS.COM"
+    cleaned = cleaned.replace(/[-.](?:www\.)?(?:comando(?:torrents|filmes)?\.(?:la|com|net)|bludv\.[a-z]+|thepiratefilmes\.com|sitedetorrents\.com)$/i, '');
 
     // Collapse multiple dots/spaces
     cleaned = cleaned.replace(/\.{2,}/g, '.').replace(/\s{2,}/g, ' ').trim();
@@ -1822,50 +2077,27 @@ private mapTorrentToStream(
       return candidate;
     }
 
-    if (typeof candidate === 'string') {
-      const trimmed = candidate.trim();
-      const numeric = Number(trimmed.replace(/[^0-9.]/g, ''));
-      if (Number.isNaN(numeric)) {
-        return undefined;
-      }
-
-      if (/\b(tb|terabyte)/i.test(trimmed)) {
-        return Math.round(numeric * 1024 * 1024 * 1024 * 1024);
-      }
-      if (/\b(gb|gigabyte)/i.test(trimmed)) {
-        return Math.round(numeric * 1024 * 1024 * 1024);
-      }
-      if (/\b(mb|megabyte)/i.test(trimmed)) {
-        return Math.round(numeric * 1024 * 1024);
-      }
-      if (/\b(kb|kilobyte)/i.test(trimmed)) {
-        return Math.round(numeric * 1024);
-      }
-      if (/\b(bytes?|b)\b/i.test(trimmed)) {
-        return Math.round(numeric);
-      }
-    }
-
-    return undefined;
+    return this.parseSizeString(candidate);
   }
 
   private inferQualityFromTitle(title: string): string | undefined {
-    const match = title.match(/(4k|2160p|1440p|1080p|720p|480p)/i);
-    if (!match) {
-      return undefined;
+    const match = title.match(/(4k|UHD|2160p|1440p|FHD|FULLHD|1080p|HD|720p|480p|360p)/i);
+    if (match?.[1]) {
+      const q = match[1].toLowerCase();
+      if (q === '4k' || q === 'uhd') return '4K';
+      if (q === 'fhd' || q === 'fullhd') return '1080p';
+      if (q === 'hd') return '720p';
+      return q;
     }
 
-    const captured = match[1];
-    if (!captured) {
-      return undefined;
-    }
+    // Fallback: infer from source tag when no explicit resolution
+    if (/\b(blu[\s.-]?ray|bdrip|bdremux|remux)\b/i.test(title)) return '1080p';
+    if (/\b(web[\s.-]?dl|webrip)\b/i.test(title)) return '720p';
+    if (/\b(hdtv|hdrip)\b/i.test(title)) return '720p';
+    if (/\b(dvdrip|dvdscr)\b/i.test(title)) return '480p';
+    if (/\b(cam|hdcam|telesync|telecine)\b/i.test(title)) return 'CAM';
 
-    const quality = captured.toLowerCase();
-    if (quality === '4k') {
-      return '4K';
-    }
-
-    return quality;
+    return undefined;
   }
 
   private normalizeTorrentPayload(payload: unknown): TorrentLike[] {
