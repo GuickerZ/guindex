@@ -162,6 +162,11 @@ export class ConfigController {
     }
     .btn:hover { background: var(--accent-hover); }
     .btn:active { transform: scale(0.98); }
+    .btn[disabled] {
+      opacity: 0.5;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
     .links { margin-top: 16px; text-align: center; font-size: 11px; color: var(--text-xdim); line-height: 2; }
     .links a { color: var(--accent); text-decoration: none; font-weight: 500; }
     .links a:hover { text-decoration: underline; }
@@ -206,6 +211,130 @@ export class ConfigController {
       z-index: 999;
     }
     .toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.72);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      z-index: 1000;
+    }
+    .modal-backdrop.show { display: flex; }
+    .modal {
+      width: 100%;
+      max-width: 540px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: 0 12px 44px rgba(0, 0, 0, 0.6);
+      overflow: hidden;
+    }
+    .modal-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+    .modal-title {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+    }
+    .modal-close {
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--text);
+      border-radius: 6px;
+      width: 30px;
+      height: 30px;
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+    }
+    .modal-body {
+      padding: 16px;
+      display: grid;
+      gap: 14px;
+    }
+    .modal-grid {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: 1.15fr 0.85fr;
+    }
+    .modal-panel {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+    }
+    .modal-panel h3 {
+      font-size: 12px;
+      margin-bottom: 8px;
+      color: var(--text);
+      letter-spacing: 0.2px;
+    }
+    .modal-panel p {
+      font-size: 11px;
+      color: var(--text-dim);
+      line-height: 1.5;
+      margin-bottom: 10px;
+    }
+    .modal-url {
+      font-size: 10px;
+      color: var(--accent);
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      padding: 8px;
+      word-break: break-all;
+      margin-top: 8px;
+    }
+    .modal-actions {
+      display: grid;
+      gap: 8px;
+    }
+    .modal-btn {
+      width: 100%;
+      border: 1px solid var(--border);
+      background: var(--surface-2);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 10px;
+      font-size: 12px;
+      font-weight: 600;
+      text-decoration: none;
+      text-align: center;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .modal-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .modal-btn.primary {
+      background: var(--accent);
+      color: #000;
+      border-color: transparent;
+    }
+    .modal-btn.primary:hover { background: var(--accent-hover); color: #000; }
+    .qr {
+      width: 100%;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #fff;
+      display: block;
+    }
+    .hint-mini {
+      margin-top: 8px;
+      font-size: 10px;
+      color: var(--text-xdim);
+      text-align: center;
+      line-height: 1.5;
+    }
+    @media (max-width: 640px) {
+      .card { padding: 22px; }
+      .modal-grid { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
@@ -249,8 +378,8 @@ export class ConfigController {
       </div>
 
       <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 12px;">
-        <a id="installBtn" class="btn" href="#" onclick="if(this.getAttribute('href')==='#'){alert('Preencha o token do provedor selecionado antes de instalar.');return false;}" style="text-align:center; text-decoration:none; display:flex; align-items:center; justify-content:center; box-sizing: border-box;">Instalar no App (Windows/Android)</a>
-        <a id="installWebBtn" class="btn" href="#" onclick="if(this.getAttribute('href')==='#'){alert('Preencha o token do provedor selecionado antes de instalar.');return false;}" style="text-align:center; text-decoration:none; display:flex; align-items:center; justify-content:center; box-sizing: border-box; background: var(--surface-2); color: var(--text); border: 1px solid var(--border);">Instalar no Stremio Web</a>
+        <button type="button" id="installBtn" class="btn">Instalar no App (Windows/Android)</button>
+        <button type="button" id="installWebBtn" class="btn" style="background: var(--surface-2); color: var(--text); border: 1px solid var(--border);">Instalar no Stremio Web</button>
         <button type="button" id="copyBtn" class="btn" style="background: var(--surface-2); color: var(--text); border: 1px solid var(--border);">Copiar URL (Outros dispositivos)</button>
       </div>
     </form>
@@ -277,6 +406,36 @@ export class ConfigController {
     </div>
   </div>
 
+  <div class="modal-backdrop" id="installModal" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-head">
+        <div id="modalTitle" class="modal-title">Instalacao do addon</div>
+        <button type="button" class="modal-close" id="closeModal" aria-label="Fechar">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-grid">
+          <div class="modal-panel">
+            <h3>Windows / Android (App Stremio)</h3>
+            <p>Clique em abrir no app. Se o navegador bloquear, copie a URL e cole manualmente no Stremio.</p>
+            <div class="modal-actions">
+              <button type="button" class="modal-btn primary" id="openInStremioBtn">Abrir no Stremio</button>
+              <button type="button" class="modal-btn" id="copyFromModalBtn">Copiar URL de instalacao</button>
+              <a id="installWebLink" class="modal-btn" href="#" target="_blank" rel="noopener noreferrer">Instalar no Stremio Web</a>
+            </div>
+            <div id="modalUrl" class="modal-url"></div>
+          </div>
+
+          <div class="modal-panel">
+            <h3>Android rapido</h3>
+            <p>Escaneie o QR code com o celular para abrir o link de instalacao.</p>
+            <img id="installQr" class="qr" alt="QR code de instalacao">
+            <div class="hint-mini">No Android, pode aparecer confirmacao para abrir no app Stremio.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
 
   <script>
@@ -285,6 +444,15 @@ export class ConfigController {
       var provEl = document.getElementById('provider');
       var rdGroup = document.getElementById('rdGroup');
       var tbGroup = document.getElementById('tbGroup');
+      var installBtn = document.getElementById('installBtn');
+      var installWebBtn = document.getElementById('installWebBtn');
+      var installModal = document.getElementById('installModal');
+      var closeModalBtn = document.getElementById('closeModal');
+      var modalUrlEl = document.getElementById('modalUrl');
+      var installWebLink = document.getElementById('installWebLink');
+      var installQr = document.getElementById('installQr');
+      var openInStremioBtn = document.getElementById('openInStremioBtn');
+      var copyFromModalBtn = document.getElementById('copyFromModalBtn');
 
       function toggle() {
         var tb = provEl.value === 'torbox';
@@ -317,23 +485,88 @@ export class ConfigController {
         return baseUrl + '/manifest.json?' + params.toString();
       }
 
-      function updateInstallLink() {
-        var url = buildUrl();
-        var installBtn = document.getElementById('installBtn');
-        var installWebBtn = document.getElementById('installWebBtn');
-        if (url) {
-          installBtn.href = url.replace(/^https?:\/\//i, 'stremio://');
-          installWebBtn.href = 'https://web.stremio.com/#/addons?addon=' + encodeURIComponent(url);
-        } else {
-          installBtn.href = '#';
-          installWebBtn.href = '#';
-        }
+      function toStremioProtocol(url) {
+        return 'stremio://' + url.replace(/^https?:\/\//i, '');
       }
 
-      document.getElementById('provider').addEventListener('change', updateInstallLink);
-      document.getElementById('rdToken').addEventListener('input', updateInstallLink);
-      document.getElementById('tbToken').addEventListener('input', updateInstallLink);
-      updateInstallLink();
+      function updateInstallState() {
+        var url = buildUrl();
+        installBtn.disabled = !url;
+        installWebBtn.disabled = !url;
+      }
+
+      function openModal() {
+        var url = buildUrl();
+        if (!url) {
+          alert('Preencha o token do provedor selecionado antes de instalar.');
+          return;
+        }
+
+        modalUrlEl.textContent = url;
+        installWebLink.href = 'https://web.stremio.com/#/addons?addon=' + encodeURIComponent(url);
+        installQr.src = 'https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=' + encodeURIComponent(url);
+
+        installModal.classList.add('show');
+        installModal.setAttribute('aria-hidden', 'false');
+      }
+
+      function closeModal() {
+        installModal.classList.remove('show');
+        installModal.setAttribute('aria-hidden', 'true');
+      }
+
+      function openInStremio() {
+        var url = buildUrl();
+        if (!url) {
+          alert('Preencha o token do provedor selecionado antes de instalar.');
+          return;
+        }
+
+        var stremioUrl = toStremioProtocol(url);
+        window.location.href = stremioUrl;
+
+        setTimeout(function() {
+          showToast('Se o app nao abriu, use "Copiar URL de instalacao" no modal.');
+        }, 1200);
+      }
+
+      installBtn.addEventListener('click', openModal);
+      installWebBtn.addEventListener('click', function() {
+        var url = buildUrl();
+        if (!url) {
+          alert('Preencha o token do provedor selecionado antes de instalar.');
+          return;
+        }
+        window.open('https://web.stremio.com/#/addons?addon=' + encodeURIComponent(url), '_blank', 'noopener,noreferrer');
+      });
+
+      openInStremioBtn.addEventListener('click', openInStremio);
+      copyFromModalBtn.addEventListener('click', function() {
+        var url = buildUrl();
+        if (!url) { return; }
+        navigator.clipboard.writeText(url).then(function() {
+          showToast('URL de instalacao copiada!');
+        }).catch(function() {
+          prompt('Copie esta URL e cole no Stremio:', url);
+        });
+      });
+
+      closeModalBtn.addEventListener('click', closeModal);
+      installModal.addEventListener('click', function(e) {
+        if (e.target === installModal) {
+          closeModal();
+        }
+      });
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && installModal.classList.contains('show')) {
+          closeModal();
+        }
+      });
+
+      document.getElementById('provider').addEventListener('change', updateInstallState);
+      document.getElementById('rdToken').addEventListener('input', updateInstallState);
+      document.getElementById('tbToken').addEventListener('input', updateInstallState);
+      updateInstallState();
 
       document.getElementById('copyBtn').addEventListener('click', function(e) {
         e.preventDefault();
