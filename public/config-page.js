@@ -17,7 +17,9 @@
       openInStremioBtn: document.getElementById('openInStremioBtn'),
       copyFromModalBtn: document.getElementById('copyFromModalBtn'),
       aioUrl: document.getElementById('aioUrl'),
-      toast: document.getElementById('toast')
+      toast: document.getElementById('toast'),
+      providerChip: document.getElementById('providerChip'),
+      tokenChip: document.getElementById('tokenChip')
     };
   }
 
@@ -85,6 +87,38 @@
     els.rdGroup.style.display = isTorBox ? 'none' : 'block';
     els.tbGroup.style.display = isTorBox ? 'block' : 'none';
     updateAioUrl();
+    updateStatusChips();
+  }
+
+  function maskToken(value) {
+    if (!value) {
+      return 'Pendente';
+    }
+    if (value.length <= 8) {
+      return 'Definido';
+    }
+    return value.slice(0, 4) + '...' + value.slice(-4);
+  }
+
+  function updateStatusChips() {
+    var els = getEls();
+    if (!els.provEl || !els.providerChip || !els.tokenChip || !els.rdToken || !els.tbToken) {
+      return;
+    }
+
+    var provider = els.provEl.value;
+    var isTorBox = provider === 'torbox';
+    var providerLabel = isTorBox ? 'TorBox' : 'Real-Debrid';
+    var tokenValue = isTorBox ? els.tbToken.value.trim() : els.rdToken.value.trim();
+
+    els.providerChip.innerHTML = '<strong>PROVEDOR</strong>' + providerLabel;
+    els.tokenChip.innerHTML = '<strong>TOKEN</strong>' + maskToken(tokenValue);
+
+    if (tokenValue) {
+      els.tokenChip.classList.add('ok');
+    } else {
+      els.tokenChip.classList.remove('ok');
+    }
   }
 
   function openInstallModal() {
@@ -180,8 +214,14 @@
     applyProviderUi();
 
     els.provEl.addEventListener('change', applyProviderUi);
-    els.rdToken.addEventListener('input', updateAioUrl);
-    els.tbToken.addEventListener('input', updateAioUrl);
+    els.rdToken.addEventListener('input', function () {
+      updateAioUrl();
+      updateStatusChips();
+    });
+    els.tbToken.addEventListener('input', function () {
+      updateAioUrl();
+      updateStatusChips();
+    });
 
     els.installBtn.addEventListener('click', openInstallModal);
     els.closeModalBtn.addEventListener('click', closeInstallModal);

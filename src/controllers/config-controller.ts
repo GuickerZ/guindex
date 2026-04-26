@@ -70,6 +70,18 @@ export class ConfigController {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GuIndex - Addon Stremio BR</title>
+  <meta name="description" content="Configure o GuIndex para Stremio com TorBox ou Real-Debrid e instale com 1 clique.">
+  <meta property="og:title" content="GuIndex - Configuracao do Addon Stremio">
+  <meta property="og:description" content="Painel oficial do GuIndex para configurar token, gerar manifest e instalar no Stremio.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="${baseUrl}/configure">
+  <meta property="og:image" content="${baseUrl}/logo.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="GuIndex - Configuracao do Addon">
+  <meta name="twitter:description" content="Configure e instale o GuIndex no Stremio.">
+  <meta name="twitter:image" content="${baseUrl}/logo.png">
+  <meta name="theme-color" content="#10b981">
+  <link rel="icon" type="image/png" href="/logo.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -112,6 +124,24 @@ export class ConfigController {
       box-shadow: 0 8px 32px rgba(0,0,0,0.5);
     }
     .header { text-align: center; margin-bottom: 24px; }
+    .logo-wrap {
+      width: 72px;
+      height: 72px;
+      margin: 0 auto 10px;
+      border-radius: 18px;
+      padding: 10px;
+      background:
+        linear-gradient(140deg, rgba(16, 185, 129, 0.18), rgba(99, 102, 241, 0.12)),
+        var(--surface-2);
+      border: 1px solid rgba(16, 185, 129, 0.25);
+      box-shadow: 0 8px 24px rgba(16, 185, 129, 0.12);
+    }
+    .logo-mark {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: contain;
+    }
     .logo { font-size: 32px; font-weight: 800; letter-spacing: -1px; }
     .logo span { color: var(--accent); }
     .badge {
@@ -139,6 +169,35 @@ export class ConfigController {
     .info-box a { color: var(--accent); text-decoration: none; font-weight: 600; }
     .info-box a:hover { text-decoration: underline; }
     .form-group { margin-bottom: 16px; }
+    .status-row {
+      display: grid;
+      gap: 8px;
+      grid-template-columns: 1fr 1fr;
+      margin-bottom: 12px;
+    }
+    .status-chip {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 11px;
+      color: var(--text-dim);
+      line-height: 1.4;
+    }
+    .status-chip strong {
+      color: var(--text);
+      font-weight: 700;
+      display: block;
+      margin-bottom: 1px;
+      font-size: 10px;
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+    }
+    .status-chip.ok {
+      border-color: rgba(16, 185, 129, 0.35);
+      background: rgba(16, 185, 129, 0.09);
+      color: #a7f3d0;
+    }
     label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px; color: var(--text); letter-spacing: 0.3px; }
     .helper { font-size: 11px; color: var(--text-xdim); margin-top: 3px; }
     select, input[type="text"] {
@@ -357,12 +416,16 @@ export class ConfigController {
     @media (max-width: 640px) {
       .card { padding: 22px; }
       .modal-grid { grid-template-columns: 1fr; }
+      .status-row { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body data-base-url="${baseUrl}">
   <div class="card">
     <div class="header">
+      <div class="logo-wrap">
+        <img class="logo-mark" src="/logo.png" alt="GuIndex logo">
+      </div>
       <div class="logo">Gu<span>Index</span></div>
       <div class="badge">v1.2.0 &bull; Open Source</div>
       <div class="subtitle">
@@ -379,6 +442,11 @@ export class ConfigController {
     </div>
 
     <form id="configForm">
+      <div class="status-row">
+        <div class="status-chip" id="providerChip"><strong>PROVEDOR</strong>TorBox</div>
+        <div class="status-chip" id="tokenChip"><strong>TOKEN</strong>Pendente</div>
+      </div>
+
       <div class="form-group">
         <label for="provider">PROVEDOR DEBRID</label>
         <select id="provider">
@@ -403,6 +471,13 @@ export class ConfigController {
       <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 12px;">
         <button type="button" id="installBtn" class="btn">Instalar Addon</button>
         <div class="helper" style="text-align:center">As opcoes de instalacao aparecem no modal.</div>
+      </div>
+
+      <div class="info-box" style="margin-top:14px; margin-bottom:0; background:rgba(99,102,241,0.08); border-color:rgba(99,102,241,0.2)">
+        <strong style="color:var(--text); font-size:12px; display:block; margin-bottom:4px">Como configurar rapido</strong>
+        1) Escolha o provedor (TorBox ou Real-Debrid).<br>
+        2) Cole o token correspondente.<br>
+        3) Clique em "Instalar Addon" e escolha como abrir.
       </div>
     </form>
 
