@@ -138,12 +138,18 @@ npm start
 | `TORRENT_INDEXER_FALLBACK_TIMEOUT_MS` | Nao | Timeout por request no fallback e `/search` (padrao: `4500`) |
 | `TORRENT_INDEXER_MAX_QUERY_TIME_MS` | Nao | Orcamento maximo de tempo por busca de stream antes de parar novas tentativas (padrao: `15000`) |
 | `TORRENT_INDEXER_TARGET_STREAMS` | Nao | Quantidade alvo de streams para encerrar cedo quando ja houver diversidade (padrao: `12`) |
+| `TORRENT_INDEXER_MAX_DYNAMIC_QUERIES` | Nao | Limite de queries dinamicas geradas a partir de titulos retornados para melhorar recall (padrao: `10`) |
 | `TORRENT_INDEXER_HYBRID_MIN_RESULTS` | Nao | Abaixo disso, complementa `/search` com fallback (padrao: `10`) |
 | `TORRENT_INDEXER_HYBRID_MIN_INDEXERS` | Nao | Numero minimo de fontes distintas antes de acionar boost (padrao: `2`) |
 | `TORRENT_INDEXER_HYBRID_TARGET_RESULTS` | Nao | Meta de resultados agregados na busca hibrida (padrao: `24`) |
 | `TORRENT_INDEXER_MAX_STREAMS_PER_SOURCE` | Nao | Limita quantidade de streams por source para evitar monopolio (padrao: `18`) |
+| `TORRENT_INDEXER_DISABLED_INDEXERS` | Nao | Lista CSV de indexers desativados (padrao: `comando_torrents`) |
+| `TORRENT_INDEXER_FAILURE_THRESHOLD` | Nao | Falhas consecutivas antes de colocar a source em cooldown temporario (padrao: `2`) |
+| `TORRENT_INDEXER_FAILURE_COOLDOWN_MS` | Nao | Tempo de cooldown de uma source apos atingir o limite de falhas (padrao: `900000`) |
 | `TORBOX_WAIT_VIDEO_URL` | Nao | Video de espera enquanto TorBox processa |
 | `TORBOX_STREAM_LIMIT` | Nao | Limite de streams TorBox (padrao: `15`) |
+
+> Compatibilidade: `TORRENT_INDEXER_INDEXER_FAILURE_THRESHOLD` e `TORRENT_INDEXER_INDEXER_FAILURE_COOLDOWN_MS` continuam aceitos como aliases legados.
 
 ### Uso com Stremio
 

@@ -17,6 +17,10 @@ services:
       # - TORRENT_INDEXER_FALLBACK_CONCURRENCY=3
       # - TORRENT_INDEXER_MAX_QUERY_TIME_MS=15000
       # - TORRENT_INDEXER_TARGET_STREAMS=12
+      # - TORRENT_INDEXER_MAX_DYNAMIC_QUERIES=10
+      # - TORRENT_INDEXER_DISABLED_INDEXERS=comando_torrents
+      # - TORRENT_INDEXER_FAILURE_THRESHOLD=2
+      # - TORRENT_INDEXER_FAILURE_COOLDOWN_MS=900000
       # OBRIGATÓRIO: defina o domínio público da sua instância
       # - BASE_URL=https://seu-dominio.com
     volumes:

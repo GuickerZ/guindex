@@ -56,6 +56,11 @@ interface SearchCacheEntry {
   data: TorrentLike[];
 }
 
+interface IndexerFailureState {
+  consecutiveFailures: number;
+  cooldownUntil: number;
+}
+
 interface IndexerPerformanceEntry {
   avgMs: number;
   samples: number;
@@ -82,6 +87,27 @@ const parseNonNegativeInt = (value: string | undefined, fallback: number): numbe
   return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : fallback;
 };
 
+const normalizeIndexerValue = (value: string): string =>
+  value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '_')
+    .replace(/[^a-z0-9_-]+/g, '');
+
+const parseCsvSet = (value: string | undefined, defaults: string[] = []): Set<string> => {
+  const raw = value ?? defaults.join(',');
+  const out = new Set<string>();
+  for (const item of raw.split(',')) {
+    const normalized = normalizeIndexerValue(item);
+    if (normalized) {
+      out.add(normalized);
+    }
+  }
+  return out;
+};
+
 const parseBoolean = (value: string | undefined, fallback: boolean): boolean => {
   if (value === undefined) return fallback;
   const normalized = value.trim().toLowerCase();
@@ -90,10 +116,27 @@ const parseBoolean = (value: string | undefined, fallback: boolean): boolean => 
   return fallback;
 };
 
+const readEnv = (primary: string, legacy?: string): string | undefined => {
+  const primaryValue = process.env[primary];
+  if (primaryValue !== undefined) {
+    return primaryValue;
+  }
+
+  if (legacy) {
+    return process.env[legacy];
+  }
+
+  return undefined;
+};
+
 const MAX_STREAMS = 60;
 const TARGET_STREAMS_PER_REQUEST = parsePositiveInt(
   process.env.TORRENT_INDEXER_TARGET_STREAMS,
   12,
+);
+const MAX_DYNAMIC_QUERIES = parsePositiveInt(
+  process.env.TORRENT_INDEXER_MAX_DYNAMIC_QUERIES,
+  10,
 );
 const MAX_SEARCH_TIME_MS = parsePositiveInt(
   process.env.TORRENT_INDEXER_MAX_QUERY_TIME_MS,
@@ -107,10 +150,7 @@ const MAX_TEXT_QUERIES = 6;
 const INDEXER_QUERY_PROFILES: Record<string, IndexerQueryProfile> = {
   'comando_torrents': { supportsImdbQuery: false },
   bludv: { supportsImdbQuery: false },
-  'torrent-dos-filmes': { supportsImdbQuery: false },
-  rede_torrent: { supportsImdbQuery: false },
-  vaca_torrent: { supportsImdbQuery: false },
-  'starck-filmes': { supportsImdbQuery: false },
+  filme_torrent: { supportsImdbQuery: false },
 };
 const EPISODIC_HINT_REGEX =
   /(S[0-9]{1,3}(E[0-9]{1,3})?|S[0-9]{1,3}[._ -]?(19|20)[0-9]{2}|[0-9]+[xÃ—][0-9]+|temporadas?|season|seasons|temp\.?\s*\d|epis[oÃ³]dios?|epis[oÃ³]dio|episode|episodes|serie|sÃ©rie|sÃ©ries|series|minissÃ©rie|mini[\s-]?s[eÃ©]rie|ep\.?\s*[0-9]+|cap[iÃ­]tulo|capitulo|cap\.?\s*[0-9]+|completa|completo|complete|collection|cole[Ã§c][aÃ£]o|box\s*set|pack|integral|[0-9]+[ÂªÂºa]\s*temp)/i;
@@ -353,7 +393,20 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     process.env.TORRENT_INDEXER_HYBRID_TARGET_RESULTS,
     24,
   );
+  private static readonly DISABLED_INDEXERS = parseCsvSet(
+    readEnv('TORRENT_INDEXER_DISABLED_INDEXERS'),
+    ['comando_torrents'],
+  );
+  private static readonly INDEXER_FAILURE_THRESHOLD = parsePositiveInt(
+    readEnv('TORRENT_INDEXER_FAILURE_THRESHOLD', 'TORRENT_INDEXER_INDEXER_FAILURE_THRESHOLD'),
+    2,
+  );
+  private static readonly INDEXER_FAILURE_COOLDOWN_MS = parsePositiveInt(
+    readEnv('TORRENT_INDEXER_FAILURE_COOLDOWN_MS', 'TORRENT_INDEXER_INDEXER_FAILURE_COOLDOWN_MS'),
+    900_000,
+  );
   private static readonly indexerPerformance = new Map<string, IndexerPerformanceEntry>();
+  private static readonly indexerFailureState = new Map<string, IndexerFailureState>();
 
   constructor(name: string, baseUrl: string) {
     super(name);
@@ -430,8 +483,14 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     const sourceCounts = new Map<string, number>();
     const searchStartedAt = Date.now();
     let attemptedQueries = 0;
+    let remainingDynamicQueries = MAX_DYNAMIC_QUERIES;
 
-    for (const query of queries) {
+    for (let queryIndex = 0; queryIndex < queries.length; queryIndex += 1) {
+      const query = queries[queryIndex] ?? '';
+      if (!query) {
+        continue;
+      }
+
       attemptedQueries += 1;
       if (
         Date.now() - searchStartedAt >= MAX_SEARCH_TIME_MS &&
@@ -441,6 +500,27 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       }
 
       const torrents = this.rankTorrentsByQuery(await this.fetchSearchResults(query), query);
+
+      if (remainingDynamicQueries > 0 && streams.length < TARGET_STREAMS_PER_REQUEST) {
+        const dynamicQueries = this.collectDynamicQueryCandidates(
+          type,
+          parsed,
+          torrents,
+          releaseYear,
+          episodeTitle,
+        );
+
+        for (const dynamicQuery of dynamicQueries) {
+          if (remainingDynamicQueries <= 0) {
+            break;
+          }
+          if (!queries.includes(dynamicQuery)) {
+            queries.push(dynamicQuery);
+            remainingDynamicQueries -= 1;
+          }
+        }
+      }
+
       for (const torrent of torrents) {
         if (!this.isRelevantTorrent(torrent, context)) {
           continue;
@@ -733,6 +813,9 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
     const selected = indexers
       .filter((name) => {
+        if (this.shouldSkipIndexer(name)) {
+          return false;
+        }
         if (!excluded || excluded.size === 0) {
           return true;
         }
@@ -797,7 +880,9 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
         return [];
       }
 
-      const parsedNames = names.filter((name): name is string => typeof name === 'string' && name.length > 0);
+      const parsedNames = names
+        .filter((name): name is string => typeof name === 'string' && name.length > 0)
+        .filter((name) => !this.shouldSkipIndexer(name));
       const sorted = [...parsedNames].sort((a, b) => this.compareIndexerPriority(a, b));
       TorrentIndexerProvider.indexerNamesCache = {
         ts: Date.now(),
@@ -819,6 +904,10 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     limit: number,
   ): Promise<TorrentLike[]> {
     const normalizedIndexer = indexerName.trim().toLowerCase();
+    if (this.shouldSkipIndexer(normalizedIndexer)) {
+      return [];
+    }
+
     const profile = INDEXER_QUERY_PROFILES[normalizedIndexer];
     const isImdbQuery = /^tt\d+$/i.test(query.trim());
     if (isImdbQuery && profile && !profile.supportsImdbQuery) {
@@ -837,6 +926,11 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
         signal: AbortSignal.timeout(TorrentIndexerProvider.FALLBACK_REQUEST_TIMEOUT_MS),
         headers: { Accept: 'application/json' },
       });
+      if (response.statusCode >= 500) {
+        this.recordIndexerFailure(normalizedIndexer);
+        this.recordIndexerPerformance(normalizedIndexer, Date.now() - startedAt, 0);
+        return [];
+      }
       if (response.statusCode >= 400) {
         this.recordIndexerPerformance(normalizedIndexer, Date.now() - startedAt, 0);
         return [];
@@ -844,9 +938,11 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
       const payload = await response.body.json();
       const results = this.normalizeTorrentPayload(payload);
+      this.clearIndexerFailure(normalizedIndexer);
       this.recordIndexerPerformance(normalizedIndexer, Date.now() - startedAt, results.length);
       return results;
     } catch {
+      this.recordIndexerFailure(normalizedIndexer);
       this.recordIndexerPerformance(normalizedIndexer, Date.now() - startedAt, 0);
       return [];
     }
@@ -972,6 +1068,57 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       .replace(/\s+/g, '_')
       .replace(/[^a-z0-9_-]+/g, '')
       .trim();
+  }
+
+  private shouldSkipIndexer(indexerName: string): boolean {
+    const slug = this.normalizeIndexerSlug(indexerName);
+    if (!slug) {
+      return true;
+    }
+
+    if (TorrentIndexerProvider.DISABLED_INDEXERS.has(slug)) {
+      return true;
+    }
+
+    const state = TorrentIndexerProvider.indexerFailureState.get(slug);
+    if (!state) {
+      return false;
+    }
+
+    if (state.cooldownUntil > Date.now()) {
+      return true;
+    }
+
+    return false;
+  }
+
+  private recordIndexerFailure(indexerSlug: string): void {
+    const current = TorrentIndexerProvider.indexerFailureState.get(indexerSlug);
+    const nextFailures = (current?.consecutiveFailures ?? 0) + 1;
+    const shouldCooldown = nextFailures >= TorrentIndexerProvider.INDEXER_FAILURE_THRESHOLD;
+
+    TorrentIndexerProvider.indexerFailureState.set(indexerSlug, {
+      consecutiveFailures: nextFailures,
+      cooldownUntil: shouldCooldown
+        ? Date.now() + TorrentIndexerProvider.INDEXER_FAILURE_COOLDOWN_MS
+        : 0,
+    });
+  }
+
+  private clearIndexerFailure(indexerSlug: string): void {
+    const current = TorrentIndexerProvider.indexerFailureState.get(indexerSlug);
+    if (!current) {
+      return;
+    }
+
+    if (current.consecutiveFailures === 0 && current.cooldownUntil === 0) {
+      return;
+    }
+
+    TorrentIndexerProvider.indexerFailureState.set(indexerSlug, {
+      consecutiveFailures: 0,
+      cooldownUntil: 0,
+    });
   }
 
   private rankTorrentsByQuery(results: TorrentLike[], query: string): TorrentLike[] {
@@ -1329,43 +1476,174 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     const seenTitles = Array.from(new Set(targetTitles.map((t) => this.sanitizeQuery(t)).filter(Boolean) as string[]));
     const limitedTitles = seenTitles.slice(0, 6);
 
-    for (const title of limitedTitles) {
-      if (type.toLowerCase() === 'movie') {
-        add(title);
+    for (const baseTitle of limitedTitles) {
+      const titleVariants = this.buildLocaleTitleVariants(baseTitle).slice(0, 5);
+      for (const title of titleVariants) {
+        if (type.toLowerCase() === 'movie') {
+          add(title);
+          if (releaseYear) {
+            add(`${title} ${releaseYear}`);
+          }
+          continue;
+        }
+
+        // Series: mix PT-BR wording and SxxEyy notation for better source coverage.
+        if (parsed.season !== undefined) {
+          const s = parsed.season;
+          const sPad = String(s).padStart(2, '0');
+          add(`${title} temporada ${s}`);
+          add(`${title} season ${s}`);
+          add(`${title} S${sPad}`);
+
+          if (parsed.episode !== undefined) {
+            const e = parsed.episode;
+            const ePad = String(e).padStart(2, '0');
+            add(`${title} temporada ${s} episodio ${e}`);
+            add(`${title} season ${s} episode ${e}`);
+            add(`${title} S${sPad}E${ePad}`);
+            add(`${title} ${s}x${ePad}`);
+          }
+        }
+
+        if (episodeTitle) {
+          add(`${title} ${episodeTitle}`);
+        }
         if (releaseYear) {
           add(`${title} ${releaseYear}`);
         }
-        continue;
+        add(title);
       }
-
-      // Series: mix PT-BR wording and SxxEyy notation for better source coverage.
-      if (parsed.season !== undefined) {
-        const s = parsed.season;
-        const sPad = String(s).padStart(2, '0');
-        add(`${title} temporada ${s}`);
-        add(`${title} season ${s}`);
-        add(`${title} S${sPad}`);
-
-        if (parsed.episode !== undefined) {
-          const e = parsed.episode;
-          const ePad = String(e).padStart(2, '0');
-          add(`${title} temporada ${s} episodio ${e}`);
-          add(`${title} season ${s} episode ${e}`);
-          add(`${title} S${sPad}E${ePad}`);
-          add(`${title} ${s}x${ePad}`);
-        }
-      }
-
-      if (episodeTitle) {
-        add(`${title} ${episodeTitle}`);
-      }
-      if (releaseYear) {
-        add(`${title} ${releaseYear}`);
-      }
-      add(title);
     }
 
     return out.slice(0, MAX_TEXT_QUERIES);
+  }
+
+  private buildLocaleTitleVariants(title: string): string[] {
+    const out: string[] = [];
+    const add = (value?: string) => {
+      if (!value) {
+        return;
+      }
+      const cleaned = this.sanitizeQuery(value);
+      if (!cleaned) {
+        return;
+      }
+      if (!out.includes(cleaned)) {
+        out.push(cleaned);
+      }
+    };
+
+    const base = this.sanitizeQuery(title);
+    if (!base) {
+      return out;
+    }
+
+    add(base);
+    add(base.replace(/[:|]/g, ' '));
+
+    const enToPt: Array<[RegExp, string]> = [
+      [/\bpart\s+two\b/gi, 'parte dois'],
+      [/\bpart\s+three\b/gi, 'parte tres'],
+      [/\bpart\s+one\b/gi, 'parte um'],
+      [/\bpart\s+([0-9]+)\b/gi, 'parte $1'],
+      [/\bchapter\b/gi, 'capitulo'],
+      [/\bthe\b/gi, ''],
+    ];
+
+    const ptToEn: Array<[RegExp, string]> = [
+      [/\bparte\s+dois\b/gi, 'part two'],
+      [/\bparte\s+tres\b/gi, 'part three'],
+      [/\bparte\s+um\b/gi, 'part one'],
+      [/\bparte\s+([0-9]+)\b/gi, 'part $1'],
+      [/\bcapitulo\b/gi, 'chapter'],
+    ];
+
+    let ptVariant = base;
+    for (const [regex, replacement] of enToPt) {
+      ptVariant = ptVariant.replace(regex, replacement);
+    }
+    add(ptVariant);
+
+    let enVariant = base;
+    for (const [regex, replacement] of ptToEn) {
+      enVariant = enVariant.replace(regex, replacement);
+    }
+    add(enVariant);
+
+    return out;
+  }
+
+  private collectDynamicQueryCandidates(
+    type: string,
+    parsed: ParsedIdInfo,
+    torrents: TorrentLike[],
+    releaseYear?: number,
+    episodeTitle?: string,
+  ): string[] {
+    const out: string[] = [];
+    const add = (value?: string) => {
+      if (!value) {
+        return;
+      }
+      const cleaned = this.sanitizeQuery(value);
+      if (!cleaned || cleaned.length < 3 || cleaned.length > 140) {
+        return;
+      }
+      if (!out.includes(cleaned)) {
+        out.push(cleaned);
+      }
+    };
+
+    const topTorrents = torrents.slice(0, 40);
+    const titles: string[] = [];
+
+    for (const torrent of topTorrents) {
+      const collected = this.collectTorrentTitles(torrent);
+      for (const title of collected) {
+        if (!titles.includes(title)) {
+          titles.push(title);
+        }
+      }
+      if (titles.length >= 18) {
+        break;
+      }
+    }
+
+    for (const rawTitle of titles.slice(0, 12)) {
+      const localized = this.buildLocaleTitleVariants(rawTitle).slice(0, 4);
+      for (const title of localized) {
+        add(title);
+        if (type.toLowerCase() === 'movie') {
+          if (releaseYear) {
+            add(`${title} ${releaseYear}`);
+          }
+          continue;
+        }
+
+        if (parsed.season !== undefined) {
+          const season = parsed.season;
+          const seasonPadded = String(season).padStart(2, '0');
+          add(`${title} temporada ${season}`);
+          add(`${title} season ${season}`);
+          add(`${title} S${seasonPadded}`);
+
+          if (parsed.episode !== undefined) {
+            const episode = parsed.episode;
+            const episodePadded = String(episode).padStart(2, '0');
+            add(`${title} temporada ${season} episodio ${episode}`);
+            add(`${title} season ${season} episode ${episode}`);
+            add(`${title} S${seasonPadded}E${episodePadded}`);
+            add(`${title} ${season}x${episodePadded}`);
+          }
+        }
+
+        if (episodeTitle) {
+          add(`${title} ${episodeTitle}`);
+        }
+      }
+    }
+
+    return out.slice(0, MAX_DYNAMIC_QUERIES);
   }
 
   private isRelevantTorrent(torrent: TorrentLike, context: MatchContext): boolean {
@@ -1373,15 +1651,34 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     const normalizedType = type.toLowerCase();
     const imdb = this.extractImdb(torrent);
 
+    // If we only have an IMDb id and no title context, require IMDb metadata in the item.
+    if (parsed.imdbId && !imdb && targetTitles.length === 0) {
+      return false;
+    }
+
     // Title-based check: only for non-IMDB searches
     if (!parsed.imdbId || !imdb) {
       const torrentTitles = this.collectTorrentTitles(torrent);
       if (targetTitles.length > 0 && torrentTitles.length > 0) {
-        const normalizedTargets = targetTitles.map((title) => this.normalizeForComparison(title));
+        const normalizedTargets = targetTitles
+          .map((title) => this.normalizeForComparison(title))
+          .filter((title) => title.length >= 3);
+        const normalizedAlphabeticTargets = normalizedTargets.filter((title) => /[a-z]/.test(title));
+        const effectiveTargets =
+          normalizedAlphabeticTargets.length > 0 ? normalizedAlphabeticTargets : normalizedTargets;
+
+        // Avoid broad false positives for very short/ambiguous titles (e.g. "3%")
+        // when source items do not carry an IMDb id to confirm identity.
+        if (effectiveTargets.length === 0) {
+          return false;
+        }
+
         const normalizedTorrentTitles = torrentTitles.map((title) => this.normalizeForComparison(title));
 
         const matchesTitle = normalizedTorrentTitles.some((torrentTitle) =>
-          normalizedTargets.some((targetTitle) => torrentTitle.includes(targetTitle) || targetTitle.includes(torrentTitle)),
+          effectiveTargets.some((targetTitle) =>
+            torrentTitle.includes(targetTitle) || targetTitle.includes(torrentTitle),
+          ),
         );
 
         if (!matchesTitle) {

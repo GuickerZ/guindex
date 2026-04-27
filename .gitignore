@@ -43,3 +43,4 @@ tmp/
 temp/
 tmp-debug-provider.mjs
 tmp-probe-provider.mjs
+tmp-*
