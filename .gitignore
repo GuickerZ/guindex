@@ -46,3 +46,5 @@ tmp-probe-provider.mjs
 tmp-*
 tests/stremio-real-flow.test.mjs
 test-artifacts*
+
+.vercel
