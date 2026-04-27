@@ -145,7 +145,7 @@ const MAX_DYNAMIC_QUERIES = parsePositiveInt(
 );
 const MAX_SEARCH_TIME_MS = parsePositiveInt(
   process.env.TORRENT_INDEXER_MAX_QUERY_TIME_MS,
-  25_000,
+  18_000,
 );
 const MAX_STREAMS_PER_SOURCE = parsePositiveInt(
   process.env.TORRENT_INDEXER_MAX_STREAMS_PER_SOURCE,
@@ -751,29 +751,29 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       return cached.data;
     }
 
-    // Always run /search AND /indexers in parallel for maximum coverage.
-    // /search (Meilisearch) only returns cached results from previous queries.
-    // /indexers/{name} scrapes each source live and finds content not yet cached.
-    const searchPromise = (async (): Promise<TorrentLike[]> => {
-      const url = new URL(`${this.baseUrl}/search`);
-      url.searchParams.set('q', query);
-      url.searchParams.set('limit', '200');
-      try {
-        const response = await request(url.toString(), {
-          signal: AbortSignal.timeout(TorrentIndexerProvider.FALLBACK_REQUEST_TIMEOUT_MS),
-          headers: { Accept: 'application/json' },
-        });
-        if (response.statusCode >= 400) return [];
-        const payload = await response.body.json();
-        return this.normalizeTorrentPayload(payload);
-      } catch {
-        return [];
-      }
-    })();
+    // Phase 1: Try /search (Meilisearch cache) first — responds in <10ms.
+    // If it has enough results, return immediately for fast UX.
+    const searchResults = await this.fetchMeilisearchResults(query);
 
-    const indexersPromise = this.fetchSearchResultsFromIndexers(query);
+    if (this.hasSufficientResults(searchResults)) {
+      // Cache and return fast results immediately.
+      const ranked = this.rankTorrentsByQuery(searchResults, query);
+      TorrentIndexerProvider.searchCache.set(cacheKey, { ts: Date.now(), data: ranked });
 
-    const [searchResults, indexerResults] = await Promise.all([searchPromise, indexersPromise]);
+      // Fire-and-forget: query /indexers in background to warm the Meilisearch
+      // cache with fresh data for next time, without blocking this response.
+      this.warmIndexerCacheInBackground(query, ranked);
+
+      return ranked;
+    }
+
+    // Phase 2: /search had insufficient results — query /indexers directly.
+    // This is the slower path (5-12s) but necessary for uncached content.
+    const presentIndexers = this.collectIndexerSlugs(searchResults);
+    const indexerResults = await this.fetchSearchResultsFromIndexers(query, {
+      excludeIndexers: presentIndexers.size > 0 ? presentIndexers : undefined,
+    });
+
     const merged = this.rankTorrentsByQuery(
       this.mergeTorrentResults(searchResults, indexerResults),
       query,
@@ -781,6 +781,49 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
     TorrentIndexerProvider.searchCache.set(cacheKey, { ts: Date.now(), data: merged });
     return merged;
+  }
+
+  /**
+   * Fast Meilisearch query — typically <10ms for cached content.
+   */
+  private async fetchMeilisearchResults(query: string): Promise<TorrentLike[]> {
+    const url = new URL(`${this.baseUrl}/search`);
+    url.searchParams.set('q', query);
+    url.searchParams.set('limit', '200');
+    try {
+      const response = await request(url.toString(), {
+        signal: AbortSignal.timeout(5_000),
+        headers: { Accept: 'application/json' },
+      });
+      if (response.statusCode >= 400) return [];
+      const payload = await response.body.json();
+      return this.normalizeTorrentPayload(payload);
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Check if /search results are sufficient to skip the slow /indexers path.
+   */
+  private hasSufficientResults(results: TorrentLike[]): boolean {
+    if (results.length === 0) return false;
+    if (results.length < TorrentIndexerProvider.HYBRID_MIN_RESULTS) return false;
+    const uniqueIndexers = this.collectIndexerSlugs(results);
+    return uniqueIndexers.size >= TorrentIndexerProvider.HYBRID_MIN_INDEXERS;
+  }
+
+  /**
+   * Fire-and-forget background query to /indexers to warm the Meilisearch cache.
+   * The torrent-indexer backend automatically indexes all scraped results into
+   * Meilisearch, so subsequent /search queries will find this content.
+   */
+  private warmIndexerCacheInBackground(query: string, existingResults: TorrentLike[]): void {
+    const presentIndexers = this.collectIndexerSlugs(existingResults);
+    // Don't await — this runs in background and populates the cache for next time.
+    this.fetchSearchResultsFromIndexers(query, {
+      excludeIndexers: presentIndexers.size > 0 ? presentIndexers : undefined,
+    }).catch(() => { /* swallow errors in background warming */ });
   }
 
   private async fetchSearchResultsWithRetry(
