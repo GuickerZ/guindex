@@ -1803,16 +1803,6 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       }
     }
 
-    // For IMDb-driven series queries without IMDb metadata on the item,
-    // enforce year proximity when available to avoid generic-title collisions
-    // (e.g. "Dark" matching unrelated releases).
-    if (normalizedType !== 'movie' && parsed.imdbId && !imdb && releaseYear !== undefined) {
-      const torrentYear = this.extractYear(torrent);
-      if (torrentYear !== undefined && Math.abs(torrentYear - releaseYear) > 2) {
-        return false;
-      }
-    }
-
     // Season/episode filtering â€” applies to ALL series results (including IMDB matches)
     if (normalizedType !== 'movie' && parsed.season !== undefined) {
       const texts = this.collectSearchableTexts(torrent);

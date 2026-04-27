@@ -44,3 +44,5 @@ temp/
 tmp-debug-provider.mjs
 tmp-probe-provider.mjs
 tmp-*
+tests/stremio-real-flow.test.mjs
+test-artifacts*
