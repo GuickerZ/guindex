@@ -151,7 +151,7 @@ const MAX_STREAMS_PER_SOURCE = parsePositiveInt(
   process.env.TORRENT_INDEXER_MAX_STREAMS_PER_SOURCE,
   50,
 );
-const MAX_TEXT_QUERIES = 6;
+const MAX_TEXT_QUERIES = 12;
 const INDEXER_QUERY_PROFILES: Record<string, IndexerQueryProfile> = {
   'comando_torrents': { supportsImdbQuery: false },
   bludv: { supportsImdbQuery: false },
@@ -1584,20 +1584,24 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
           continue;
         }
 
+        // Always include the bare title first — many indexers (rede_torrent,
+        // vaca_torrent) don't support SxxEyy or "temporada" in search and
+        // return 0 when those are appended.  The bare title is the most
+        // universal query and should never be cut by the slice limit.
+        add(title);
+
         // Series: mix PT-BR wording and SxxEyy notation for better source coverage.
         if (parsed.season !== undefined) {
           const s = parsed.season;
           const sPad = String(s).padStart(2, '0');
-          add(`${title} temporada ${s}`);
-          add(`${title} season ${s}`);
           add(`${title} S${sPad}`);
+          add(`${title} temporada ${s}`);
 
           if (parsed.episode !== undefined) {
             const e = parsed.episode;
             const ePad = String(e).padStart(2, '0');
-            add(`${title} temporada ${s} episodio ${e}`);
-            add(`${title} season ${s} episode ${e}`);
             add(`${title} S${sPad}E${ePad}`);
+            add(`${title} temporada ${s} episodio ${e}`);
             add(`${title} ${s}x${ePad}`);
           }
         }
@@ -1608,7 +1612,6 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
         if (releaseYear) {
           add(`${title} ${releaseYear}`);
         }
-        add(title);
       }
     }
 
