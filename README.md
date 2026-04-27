@@ -132,6 +132,10 @@ npm start
 | `TORRENT_INDEXER_ENABLE_FALLBACK` | Nao | Ativa fallback para `/indexers/{nome}` quando `/search` vier vazio (`true`/`false`) |
 | `TORRENT_INDEXER_SEARCH_CACHE_TTL_MS` | Nao | TTL do cache de busca em memoria (padrao: `120000`) |
 | `TORRENT_INDEXER_INDEXERS_CACHE_TTL_MS` | Nao | TTL do cache da lista de indexers de `/sources` (padrao: `600000`) |
+| `TORRENT_INDEXER_LOCALIZED_TITLE_CACHE_TTL_MS` | Nao | TTL do cache de titulos localizados (IMDb -> TMDB) (padrao: `604800000`) |
+| `TORRENT_INDEXER_TMDB_TIMEOUT_MS` | Nao | Timeout de consulta ao TMDB para titulos localizados (padrao: `5000`) |
+| `TMDB_API_READ_ACCESS_TOKEN` | Nao | Token de leitura do TMDB (Bearer). Informe este ou `TMDB_API_KEY` |
+| `TMDB_API_KEY` | Nao | Chave da API TMDB. Informe esta ou `TMDB_API_READ_ACCESS_TOKEN` |
 | `TORRENT_INDEXER_FALLBACK_MAX_INDEXERS` | Nao | Maximo de indexers usados no fallback; `0` usa todos (padrao: `0`) |
 | `TORRENT_INDEXER_FALLBACK_PER_INDEXER_LIMIT` | Nao | Limite de resultados por indexer no fallback; `0` ou vazio omite o limite por completo (padrao: `0`) |
 | `TORRENT_INDEXER_FALLBACK_CONCURRENCY` | Nao | Concurrency de consultas de fallback (padrao: `3`) |
@@ -150,6 +154,45 @@ npm start
 | `TORBOX_STREAM_LIMIT` | Nao | Limite de streams TorBox (padrao: `15`) |
 
 > Compatibilidade: `TORRENT_INDEXER_INDEXER_FAILURE_THRESHOLD` e `TORRENT_INDEXER_INDEXER_FAILURE_COOLDOWN_MS` continuam aceitos como aliases legados.
+
+### Perfil recomendado para VPS (baixa latencia)
+
+Baseado na bateria completa de fontes (analise de todos os itens retornados), este perfil reduz timeout/ruido sem perder cobertura dos cenarios principais.
+
+```bash
+# Busca e fallback
+TORRENT_INDEXER_ENABLE_FALLBACK=true
+TORRENT_INDEXER_FALLBACK_MAX_INDEXERS=0
+TORRENT_INDEXER_FALLBACK_PER_INDEXER_LIMIT=35
+TORRENT_INDEXER_FALLBACK_CONCURRENCY=2
+TORRENT_INDEXER_FALLBACK_TIMEOUT_MS=3500
+
+# Orcamento e expansao de query
+TORRENT_INDEXER_MAX_QUERY_TIME_MS=12000
+TORRENT_INDEXER_TARGET_STREAMS=10
+TORRENT_INDEXER_MAX_DYNAMIC_QUERIES=6
+TORRENT_INDEXER_HYBRID_MIN_RESULTS=8
+TORRENT_INDEXER_HYBRID_MIN_INDEXERS=2
+TORRENT_INDEXER_HYBRID_TARGET_RESULTS=20
+TORRENT_INDEXER_MAX_STREAMS_PER_SOURCE=14
+
+# Saude das fontes
+TORRENT_INDEXER_DISABLED_INDEXERS=comando_torrents,bludv,filme_torrent
+TORRENT_INDEXER_FAILURE_THRESHOLD=2
+TORRENT_INDEXER_FAILURE_COOLDOWN_MS=900000
+
+# Cache
+TORRENT_INDEXER_SEARCH_CACHE_TTL_MS=120000
+TORRENT_INDEXER_INDEXERS_CACHE_TTL_MS=600000
+TORRENT_INDEXER_LOCALIZED_TITLE_CACHE_TTL_MS=604800000
+
+# Localizacao via TMDB (imdbId -> titulo pt-BR)
+TMDB_API_READ_ACCESS_TOKEN=SEU_TOKEN_TMDB
+# ou
+# TMDB_API_KEY=SUA_CHAVE_TMDB
+```
+
+Se quiser priorizar cobertura maxima de long tail em troca de mais latencia, remova uma source da lista em `TORRENT_INDEXER_DISABLED_INDEXERS`.
 
 ### Uso com Stremio
 

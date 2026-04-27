@@ -56,6 +56,11 @@ interface SearchCacheEntry {
   data: TorrentLike[];
 }
 
+interface LocalizedTitleCacheEntry {
+  ts: number;
+  titles: string[];
+}
+
 interface IndexerFailureState {
   consecutiveFailures: number;
   cooldownUntil: number;
@@ -350,6 +355,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
   private static cinemetaCache = new Map<string, { data: CinemetaMeta; ts: number }>();
   private static readonly CINEMETA_TTL = 5 * 60 * 1000; // 5 min
   private static searchCache = new Map<string, SearchCacheEntry>();
+  private static localizedTitleCache = new Map<string, LocalizedTitleCacheEntry>();
   private static indexerNamesCache:
     | { ts: number; names: string[] }
     | undefined;
@@ -361,6 +367,19 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     process.env.TORRENT_INDEXER_INDEXERS_CACHE_TTL_MS,
     600_000,
   );
+  private static readonly LOCALIZED_TITLE_CACHE_TTL_MS = parsePositiveInt(
+    process.env.TORRENT_INDEXER_LOCALIZED_TITLE_CACHE_TTL_MS,
+    7 * 24 * 60 * 60 * 1000,
+  );
+  private static readonly TMDB_TIMEOUT_MS = parsePositiveInt(
+    process.env.TORRENT_INDEXER_TMDB_TIMEOUT_MS,
+    5000,
+  );
+  private static readonly TMDB_API_READ_ACCESS_TOKEN = readEnv(
+    'TMDB_API_READ_ACCESS_TOKEN',
+    'TMDB_READ_ACCESS_TOKEN',
+  );
+  private static readonly TMDB_API_KEY = readEnv('TMDB_API_KEY');
   private static readonly ENABLE_FALLBACK_INDEXER_SEARCH = parseBoolean(
     process.env.TORRENT_INDEXER_ENABLE_FALLBACK,
     true,
@@ -422,6 +441,14 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     const metaLookupId = parsed.imdbId ?? parsed.query ?? (id || '').split(':')[0] ?? id;
     const meta = await this.fetchCinemetaMeta(type, metaLookupId);
     const displayTitles = this.collectMetaTitles(meta);
+    if (parsed.imdbId) {
+      const localizedTitles = await this.fetchLocalizedTitleCandidates(parsed.imdbId);
+      for (const title of localizedTitles) {
+        if (!displayTitles.includes(title)) {
+          displayTitles.push(title);
+        }
+      }
+    }
 
     if (parsed.query && !displayTitles.includes(parsed.query)) {
       displayTitles.push(parsed.query);
@@ -1407,6 +1434,81 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     return undefined;
   }
 
+  private async fetchLocalizedTitleCandidates(imdbId: string): Promise<string[]> {
+    const normalizedImdb = imdbId.trim().toLowerCase();
+    if (!/^tt\d+$/.test(normalizedImdb)) {
+      return [];
+    }
+
+    const cached = TorrentIndexerProvider.localizedTitleCache.get(normalizedImdb);
+    if (cached && Date.now() - cached.ts < TorrentIndexerProvider.LOCALIZED_TITLE_CACHE_TTL_MS) {
+      return cached.titles;
+    }
+
+    const readToken = TorrentIndexerProvider.TMDB_API_READ_ACCESS_TOKEN;
+    const apiKey = TorrentIndexerProvider.TMDB_API_KEY;
+    if (!readToken && !apiKey) {
+      TorrentIndexerProvider.localizedTitleCache.set(normalizedImdb, { ts: Date.now(), titles: [] });
+      return [];
+    }
+
+    const url = new URL(`https://api.themoviedb.org/3/find/${encodeURIComponent(normalizedImdb)}`);
+    url.searchParams.set('external_source', 'imdb_id');
+    url.searchParams.set('language', 'pt-BR');
+    if (apiKey) {
+      url.searchParams.set('api_key', apiKey);
+    }
+
+    const titles = new Set<string>();
+
+    try {
+      const headers: Record<string, string> = {
+        Accept: 'application/json',
+      };
+      if (readToken) {
+        headers.Authorization = `Bearer ${readToken}`;
+      }
+
+      const response = await request(url.toString(), {
+        signal: AbortSignal.timeout(TorrentIndexerProvider.TMDB_TIMEOUT_MS),
+        headers,
+      });
+
+      if (response.statusCode >= 400) {
+        TorrentIndexerProvider.localizedTitleCache.set(normalizedImdb, { ts: Date.now(), titles: [] });
+        return [];
+      }
+
+      const payload = (await response.body.json()) as {
+        movie_results?: Array<Record<string, unknown>>;
+        tv_results?: Array<Record<string, unknown>>;
+      };
+
+      const resultEntries = [...(payload.movie_results ?? []), ...(payload.tv_results ?? [])];
+      for (const entry of resultEntries) {
+        const candidates = [
+          this.toString(entry.title),
+          this.toString(entry.name),
+          this.toString(entry.original_title),
+          this.toString(entry.original_name),
+        ];
+
+        for (const candidate of candidates) {
+          const label = this.sanitizeQuery(candidate ?? '');
+          if (label) {
+            titles.add(label);
+          }
+        }
+      }
+    } catch {
+      // Ignore TMDB failures and continue with Cinemeta-only titles.
+    }
+
+    const result = Array.from(titles);
+    TorrentIndexerProvider.localizedTitleCache.set(normalizedImdb, { ts: Date.now(), titles: result });
+    return result;
+  }
+
   private buildTextQuery(
     type: string,
     parsed: ParsedIdInfo,
@@ -1698,6 +1800,16 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
         if (torrentYear !== undefined && Math.abs(torrentYear - releaseYear) > 1) {
           return false;
         }
+      }
+    }
+
+    // For IMDb-driven series queries without IMDb metadata on the item,
+    // enforce year proximity when available to avoid generic-title collisions
+    // (e.g. "Dark" matching unrelated releases).
+    if (normalizedType !== 'movie' && parsed.imdbId && !imdb && releaseYear !== undefined) {
+      const torrentYear = this.extractYear(torrent);
+      if (torrentYear !== undefined && Math.abs(torrentYear - releaseYear) > 2) {
+        return false;
       }
     }
 
