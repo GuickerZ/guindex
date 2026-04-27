@@ -134,7 +134,7 @@ const readEnv = (primary: string, legacy?: string): string | undefined => {
   return undefined;
 };
 
-const MAX_STREAMS = 60;
+const MAX_STREAMS = 120;
 const TARGET_STREAMS_PER_REQUEST = parsePositiveInt(
   process.env.TORRENT_INDEXER_TARGET_STREAMS,
   12,
@@ -145,17 +145,20 @@ const MAX_DYNAMIC_QUERIES = parsePositiveInt(
 );
 const MAX_SEARCH_TIME_MS = parsePositiveInt(
   process.env.TORRENT_INDEXER_MAX_QUERY_TIME_MS,
-  15_000,
+  25_000,
 );
 const MAX_STREAMS_PER_SOURCE = parsePositiveInt(
   process.env.TORRENT_INDEXER_MAX_STREAMS_PER_SOURCE,
-  18,
+  50,
 );
 const MAX_TEXT_QUERIES = 6;
 const INDEXER_QUERY_PROFILES: Record<string, IndexerQueryProfile> = {
   'comando_torrents': { supportsImdbQuery: false },
   bludv: { supportsImdbQuery: false },
   filme_torrent: { supportsImdbQuery: false },
+  'starck-filmes': { supportsImdbQuery: false },
+  vaca_torrent: { supportsImdbQuery: false },
+  rede_torrent: { supportsImdbQuery: false },
 };
 const EPISODIC_HINT_REGEX =
   /(S[0-9]{1,3}(E[0-9]{1,3})?|S[0-9]{1,3}[._ -]?(19|20)[0-9]{2}|[0-9]+[xÃ—][0-9]+|temporadas?|season|seasons|temp\.?\s*\d|epis[oÃ³]dios?|epis[oÃ³]dio|episode|episodes|serie|sÃ©rie|sÃ©ries|series|minissÃ©rie|mini[\s-]?s[eÃ©]rie|ep\.?\s*[0-9]+|cap[iÃ­]tulo|capitulo|cap\.?\s*[0-9]+|completa|completo|complete|collection|cole[Ã§c][aÃ£]o|box\s*set|pack|integral|[0-9]+[ÂªÂºa]\s*temp)/i;
@@ -394,11 +397,11 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
   );
   private static readonly FALLBACK_INDEXER_CONCURRENCY = parsePositiveInt(
     process.env.TORRENT_INDEXER_FALLBACK_CONCURRENCY,
-    3,
+    5,
   );
   private static readonly FALLBACK_REQUEST_TIMEOUT_MS = parsePositiveInt(
     process.env.TORRENT_INDEXER_FALLBACK_TIMEOUT_MS,
-    4500,
+    12000,
   );
   private static readonly HYBRID_MIN_RESULTS = parsePositiveInt(
     process.env.TORRENT_INDEXER_HYBRID_MIN_RESULTS,
@@ -748,44 +751,36 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       return cached.data;
     }
 
-    const url = new URL(`${this.baseUrl}/search`);
-    url.searchParams.set('q', query);
-
-    try {
-      const response = await request(url.toString(), {
-        signal: AbortSignal.timeout(TorrentIndexerProvider.FALLBACK_REQUEST_TIMEOUT_MS),
-        headers: { 'Accept': 'application/json' },
-      });
-      if (response.statusCode >= 400) {
-        const fallbackResults = await this.fetchSearchResultsWithRetry(query);
-        TorrentIndexerProvider.searchCache.set(cacheKey, { ts: Date.now(), data: fallbackResults });
-        return fallbackResults;
+    // Always run /search AND /indexers in parallel for maximum coverage.
+    // /search (Meilisearch) only returns cached results from previous queries.
+    // /indexers/{name} scrapes each source live and finds content not yet cached.
+    const searchPromise = (async (): Promise<TorrentLike[]> => {
+      const url = new URL(`${this.baseUrl}/search`);
+      url.searchParams.set('q', query);
+      url.searchParams.set('limit', '200');
+      try {
+        const response = await request(url.toString(), {
+          signal: AbortSignal.timeout(TorrentIndexerProvider.FALLBACK_REQUEST_TIMEOUT_MS),
+          headers: { Accept: 'application/json' },
+        });
+        if (response.statusCode >= 400) return [];
+        const payload = await response.body.json();
+        return this.normalizeTorrentPayload(payload);
+      } catch {
+        return [];
       }
+    })();
 
-      const payload = await response.body.json();
-      const searchResults = this.rankTorrentsByQuery(this.normalizeTorrentPayload(payload), query);
-      if (!this.shouldBoostWithFallback(searchResults)) {
-        TorrentIndexerProvider.searchCache.set(cacheKey, { ts: Date.now(), data: searchResults });
-        return searchResults;
-      }
+    const indexersPromise = this.fetchSearchResultsFromIndexers(query);
 
-      const presentIndexers = this.collectIndexerSlugs(searchResults);
-      const fallbackResults = await this.fetchSearchResultsWithRetry(query, {
-        excludeIndexers: presentIndexers,
-        targetResults: Math.max(
-          TorrentIndexerProvider.HYBRID_TARGET_RESULTS - searchResults.length,
-          1,
-        ),
-      });
+    const [searchResults, indexerResults] = await Promise.all([searchPromise, indexersPromise]);
+    const merged = this.rankTorrentsByQuery(
+      this.mergeTorrentResults(searchResults, indexerResults),
+      query,
+    );
 
-      const merged = this.rankTorrentsByQuery(this.mergeTorrentResults(searchResults, fallbackResults), query);
-      TorrentIndexerProvider.searchCache.set(cacheKey, { ts: Date.now(), data: merged });
-      return merged;
-    } catch {
-      const fallbackResults = this.rankTorrentsByQuery(await this.fetchSearchResultsWithRetry(query), query);
-      TorrentIndexerProvider.searchCache.set(cacheKey, { ts: Date.now(), data: fallbackResults });
-      return fallbackResults;
-    }
+    TorrentIndexerProvider.searchCache.set(cacheKey, { ts: Date.now(), data: merged });
+    return merged;
   }
 
   private async fetchSearchResultsWithRetry(
