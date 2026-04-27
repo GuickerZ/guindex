@@ -77,6 +77,11 @@ const parsePositiveInt = (value: string | undefined, fallback: number): number =
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
 };
 
+const parseNonNegativeInt = (value: string | undefined, fallback: number): number => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : fallback;
+};
+
 const parseBoolean = (value: string | undefined, fallback: boolean): boolean => {
   if (value === undefined) return fallback;
   const normalized = value.trim().toLowerCase();
@@ -86,11 +91,19 @@ const parseBoolean = (value: string | undefined, fallback: boolean): boolean => 
 };
 
 const MAX_STREAMS = 60;
+const TARGET_STREAMS_PER_REQUEST = parsePositiveInt(
+  process.env.TORRENT_INDEXER_TARGET_STREAMS,
+  12,
+);
+const MAX_SEARCH_TIME_MS = parsePositiveInt(
+  process.env.TORRENT_INDEXER_MAX_QUERY_TIME_MS,
+  15_000,
+);
 const MAX_STREAMS_PER_SOURCE = parsePositiveInt(
   process.env.TORRENT_INDEXER_MAX_STREAMS_PER_SOURCE,
   18,
 );
-const MAX_TEXT_QUERIES = 12;
+const MAX_TEXT_QUERIES = 6;
 const INDEXER_QUERY_PROFILES: Record<string, IndexerQueryProfile> = {
   'comando_torrents': { supportsImdbQuery: false },
   bludv: { supportsImdbQuery: false },
@@ -312,9 +325,9 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     process.env.TORRENT_INDEXER_ENABLE_FALLBACK,
     true,
   );
-  private static readonly FALLBACK_MAX_INDEXERS = parsePositiveInt(
+  private static readonly FALLBACK_MAX_INDEXERS = parseNonNegativeInt(
     process.env.TORRENT_INDEXER_FALLBACK_MAX_INDEXERS,
-    7,
+    0,
   );
   private static readonly FALLBACK_PER_INDEXER_LIMIT = parsePositiveInt(
     process.env.TORRENT_INDEXER_FALLBACK_PER_INDEXER_LIMIT,
@@ -353,7 +366,8 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     options?: SourceFetchOptions
   ): Promise<SourceStream[]> {
     const parsed = this.parseId(id);
-    const meta = await this.fetchCinemetaMeta(type, id);
+    const metaLookupId = parsed.imdbId ?? parsed.query ?? (id || '').split(':')[0] ?? id;
+    const meta = await this.fetchCinemetaMeta(type, metaLookupId);
     const displayTitles = this.collectMetaTitles(meta);
 
     if (parsed.query && !displayTitles.includes(parsed.query)) {
@@ -414,9 +428,19 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     const seen = new Set<string>();
     const streams: SourceStream[] = [];
     const sourceCounts = new Map<string, number>();
+    const searchStartedAt = Date.now();
+    let attemptedQueries = 0;
 
     for (const query of queries) {
-      const torrents = await this.fetchSearchResults(query);
+      attemptedQueries += 1;
+      if (
+        Date.now() - searchStartedAt >= MAX_SEARCH_TIME_MS &&
+        (streams.length > 0 || attemptedQueries > 2)
+      ) {
+        break;
+      }
+
+      const torrents = this.rankTorrentsByQuery(await this.fetchSearchResults(query), query);
       for (const torrent of torrents) {
         if (!this.isRelevantTorrent(torrent, context)) {
           continue;
@@ -447,6 +471,10 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
         if (streams.length >= MAX_STREAMS) {
           return streams;
         }
+      }
+
+      if (streams.length >= TARGET_STREAMS_PER_REQUEST && sourceCounts.size >= 2) {
+        break;
       }
     }
 
@@ -628,7 +656,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       }
 
       const payload = await response.body.json();
-      const searchResults = this.normalizeTorrentPayload(payload);
+      const searchResults = this.rankTorrentsByQuery(this.normalizeTorrentPayload(payload), query);
       if (!this.shouldBoostWithFallback(searchResults)) {
         TorrentIndexerProvider.searchCache.set(cacheKey, { ts: Date.now(), data: searchResults });
         return searchResults;
@@ -643,11 +671,11 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
         ),
       });
 
-      const merged = this.mergeTorrentResults(searchResults, fallbackResults);
+      const merged = this.rankTorrentsByQuery(this.mergeTorrentResults(searchResults, fallbackResults), query);
       TorrentIndexerProvider.searchCache.set(cacheKey, { ts: Date.now(), data: merged });
       return merged;
     } catch {
-      const fallbackResults = await this.fetchSearchResultsWithRetry(query);
+      const fallbackResults = this.rankTorrentsByQuery(await this.fetchSearchResultsWithRetry(query), query);
       TorrentIndexerProvider.searchCache.set(cacheKey, { ts: Date.now(), data: fallbackResults });
       return fallbackResults;
     }
@@ -669,9 +697,16 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
         ...options,
       });
       merged = this.mergeTorrentResults(merged, results);
+
+      const reachedTarget =
+        options?.targetResults !== undefined && merged.length >= options.targetResults;
+      const foundStrongMatch = this.hasStrongQueryMatch(merged, query);
+      if (reachedTarget || foundStrongMatch) {
+        break;
+      }
     }
 
-    return merged;
+    return this.rankTorrentsByQuery(merged, query);
   }
 
   private async fetchSearchResultsFromIndexers(
@@ -687,7 +722,11 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       return [];
     }
 
-    const maxIndexers = options?.maxIndexers ?? indexers.length;
+    const configuredMax = TorrentIndexerProvider.FALLBACK_MAX_INDEXERS;
+    const defaultMaxIndexers = configuredMax > 0
+      ? Math.min(configuredMax, indexers.length)
+      : indexers.length;
+    const maxIndexers = options?.maxIndexers ?? defaultMaxIndexers;
     const perIndexerLimit =
       options?.perIndexerLimit ?? TorrentIndexerProvider.FALLBACK_PER_INDEXER_LIMIT;
     const excluded = options?.excludeIndexers;
@@ -729,7 +768,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       }
     }
 
-    return merged;
+    return this.rankTorrentsByQuery(merged, query);
   }
 
   private async fetchIndexerNames(): Promise<string[]> {
@@ -872,14 +911,18 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     const statsB = TorrentIndexerProvider.indexerPerformance.get(slugB);
 
     if (statsA && statsB) {
-      if (statsA.hits !== statsB.hits) {
-        return statsB.hits - statsA.hits;
+      const rateA = (statsA.hits + 1) / (statsA.samples + 2);
+      const rateB = (statsB.hits + 1) / (statsB.samples + 2);
+      const emptyRateA = statsA.samples > 0 ? statsA.emptyHits / statsA.samples : 0;
+      const emptyRateB = statsB.samples > 0 ? statsB.emptyHits / statsB.samples : 0;
+      const scoreA = rateA * 1000 - statsA.avgMs - emptyRateA * 120;
+      const scoreB = rateB * 1000 - statsB.avgMs - emptyRateB * 120;
+
+      if (scoreA !== scoreB) {
+        return scoreB - scoreA;
       }
-      if (statsA.avgMs !== statsB.avgMs) {
-        return statsA.avgMs - statsB.avgMs;
-      }
-      if (statsA.emptyHits !== statsB.emptyHits) {
-        return statsA.emptyHits - statsB.emptyHits;
+      if (statsA.lastDurationMs !== statsB.lastDurationMs) {
+        return statsA.lastDurationMs - statsB.lastDurationMs;
       }
     } else if (statsA) {
       return -1;
@@ -929,6 +972,154 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       .replace(/\s+/g, '_')
       .replace(/[^a-z0-9_-]+/g, '')
       .trim();
+  }
+
+  private rankTorrentsByQuery(results: TorrentLike[], query: string): TorrentLike[] {
+    if (results.length <= 1) {
+      return results;
+    }
+
+    return [...results].sort((a, b) => this.scoreTorrentForQuery(b, query) - this.scoreTorrentForQuery(a, query));
+  }
+
+  private hasStrongQueryMatch(results: TorrentLike[], query: string): boolean {
+    if (results.length === 0) {
+      return false;
+    }
+
+    const imdbQuery = /^tt\d+$/i.test(query.trim());
+    const threshold = imdbQuery ? 85 : 52;
+    const candidates = results.slice(0, 40);
+    return candidates.some((torrent) => this.scoreTorrentForQuery(torrent, query) >= threshold);
+  }
+
+  private scoreTorrentForQuery(torrent: TorrentLike, query: string): number {
+    const record = torrent as Record<string, unknown>;
+    let score = 0;
+    const rawQuery = query.trim();
+    const rawTitle = this.extractTitle(torrent) ?? '';
+    const rawOriginalTitle = this.toString(record.original_title) ?? '';
+    const normalizedTitle = this.normalizeLooseText(`${rawTitle} ${rawOriginalTitle}`);
+
+    const similarity = this.toNumber(record.similarity);
+    if (similarity !== undefined) {
+      score += Math.max(0, similarity) * 25;
+    }
+
+    const seeds = this.toNumber(record.seed_count ?? record.seeders ?? record.seeds);
+    if (seeds !== undefined && seeds > 0) {
+      score += Math.min(seeds, 200) / 20;
+    }
+
+    if (/^tt\d+$/i.test(rawQuery)) {
+      const imdb = this.extractImdb(torrent);
+      if (imdb && imdb.toLowerCase() === rawQuery.toLowerCase()) {
+        score += 120;
+      } else {
+        score -= 20;
+      }
+      return score;
+    }
+
+    const normalizedQuery = this.normalizeLooseText(rawQuery);
+    if (normalizedQuery.length >= 4 && normalizedTitle.includes(normalizedQuery)) {
+      score += 55;
+    }
+
+    const queryTokens = this.tokenizeQuery(rawQuery);
+    if (queryTokens.length > 0) {
+      let matchedTokens = 0;
+      for (const token of queryTokens) {
+        if (normalizedTitle.includes(token)) {
+          matchedTokens += 1;
+        }
+      }
+
+      score += matchedTokens * 10;
+      score += (matchedTokens / queryTokens.length) * 45;
+
+      if (matchedTokens === 0) {
+        score -= 15;
+      }
+    }
+
+    const yearMatch = rawQuery.match(/\b((?:19|20)\d{2})\b/);
+    if (yearMatch?.[1]) {
+      if (new RegExp(`\\b${yearMatch[1]}\\b`).test(rawTitle) || new RegExp(`\\b${yearMatch[1]}\\b`).test(rawOriginalTitle)) {
+        score += 8;
+      } else {
+        score -= 2;
+      }
+    }
+
+    const querySeasonEpisode = this.extractSeasonEpisodeFromText(rawQuery);
+    if (querySeasonEpisode.season !== undefined) {
+      const titleSeasonEpisode = this.extractSeasonEpisodeFromText(rawTitle);
+      if (titleSeasonEpisode.season !== undefined) {
+        if (titleSeasonEpisode.season === querySeasonEpisode.season) {
+          score += 14;
+        } else {
+          score -= 12;
+        }
+      }
+
+      if (querySeasonEpisode.episode !== undefined && titleSeasonEpisode.episode !== undefined) {
+        if (titleSeasonEpisode.episode === querySeasonEpisode.episode) {
+          score += 18;
+        } else {
+          score -= 15;
+        }
+      }
+    }
+
+    if (/\[unsafe\]/i.test(rawTitle)) {
+      score -= 6;
+    }
+
+    return score;
+  }
+
+  private normalizeLooseText(value: string): string {
+    return value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private tokenizeQuery(value: string): string[] {
+    const stopWords = new Set([
+      'the', 'a', 'an', 'and', 'or', 'of', 'da', 'de', 'do', 'dos', 'das', 'e',
+      'temporada', 'season', 'episodio', 'episodio', 'episode', 'parte', 'part',
+    ]);
+
+    return this.normalizeLooseText(value)
+      .split(' ')
+      .map((token) => token.trim())
+      .filter((token) => token.length > 1 && !stopWords.has(token));
+  }
+
+  private extractSeasonEpisodeFromText(value: string): { season?: number; episode?: number } {
+    const text = value.toLowerCase();
+    const sxe = text.match(/s(\d{1,3})e(\d{1,3})/i);
+    if (sxe?.[1] && sxe?.[2]) {
+      return { season: Number(sxe[1]), episode: Number(sxe[2]) };
+    }
+
+    const xFormat = text.match(/(\d{1,3})x(\d{1,3})/i);
+    if (xFormat?.[1] && xFormat?.[2]) {
+      return { season: Number(xFormat[1]), episode: Number(xFormat[2]) };
+    }
+
+    const season = text.match(/(?:temporada|season|temp\.?|t)\s*(\d{1,3})/i);
+    const episode = text.match(/(?:epis[oó]dio|episodio|episode|ep|cap[ií]tulo|capitulo|cap\.?)[\s._-]*(\d{1,3})/i);
+
+    return {
+      season: season?.[1] ? Number(season[1]) : undefined,
+      episode: episode?.[1] ? Number(episode[1]) : undefined,
+    };
   }
 
   private recordIndexerPerformance(indexerSlug: string, durationMs: number, resultCount: number): void {

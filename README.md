@@ -132,10 +132,12 @@ npm start
 | `TORRENT_INDEXER_ENABLE_FALLBACK` | Nao | Ativa fallback para `/indexers/{nome}` quando `/search` vier vazio (`true`/`false`) |
 | `TORRENT_INDEXER_SEARCH_CACHE_TTL_MS` | Nao | TTL do cache de busca em memoria (padrao: `120000`) |
 | `TORRENT_INDEXER_INDEXERS_CACHE_TTL_MS` | Nao | TTL do cache da lista de indexers de `/sources` (padrao: `600000`) |
-| `TORRENT_INDEXER_FALLBACK_MAX_INDEXERS` | Nao | Maximo de indexers usados no fallback (padrao: `7`) |
+| `TORRENT_INDEXER_FALLBACK_MAX_INDEXERS` | Nao | Maximo de indexers usados no fallback; `0` usa todos (padrao: `0`) |
 | `TORRENT_INDEXER_FALLBACK_PER_INDEXER_LIMIT` | Nao | Limite de resultados por indexer no fallback; `0` ou vazio omite o limite por completo (padrao: `0`) |
 | `TORRENT_INDEXER_FALLBACK_CONCURRENCY` | Nao | Concurrency de consultas de fallback (padrao: `3`) |
 | `TORRENT_INDEXER_FALLBACK_TIMEOUT_MS` | Nao | Timeout por request no fallback e `/search` (padrao: `4500`) |
+| `TORRENT_INDEXER_MAX_QUERY_TIME_MS` | Nao | Orcamento maximo de tempo por busca de stream antes de parar novas tentativas (padrao: `15000`) |
+| `TORRENT_INDEXER_TARGET_STREAMS` | Nao | Quantidade alvo de streams para encerrar cedo quando ja houver diversidade (padrao: `12`) |
 | `TORRENT_INDEXER_HYBRID_MIN_RESULTS` | Nao | Abaixo disso, complementa `/search` com fallback (padrao: `10`) |
 | `TORRENT_INDEXER_HYBRID_MIN_INDEXERS` | Nao | Numero minimo de fontes distintas antes de acionar boost (padrao: `2`) |
 | `TORRENT_INDEXER_HYBRID_TARGET_RESULTS` | Nao | Meta de resultados agregados na busca hibrida (padrao: `24`) |
