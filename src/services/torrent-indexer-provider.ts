@@ -2640,23 +2640,21 @@ private mapTorrentToStream(
   const audioLine = this.formatAudioLine(torrent);
   const languages = this.extractAudioLanguages(torrent);
 
-  const headline = quality ? `${displayTitle} [${quality}]` : displayTitle;
+  const headline = displayTitle;
   const titleLines = [headline];
   if (infoSegments.some((segment) => segment.trim().length > 0)) {
-    titleLines.push(infoSegments.join(' '));
+    titleLines.push(infoSegments.join(' | '));
   }
   if (audioLine) {
     titleLines.push(audioLine);
   }
 
-  if (detailUrl) {
-    titleLines.push(`ðŸ“¡ ${detailUrl}`);
-  }
-
-  const qualityLabel = quality ?? 'RD';
-  const nameLines = [`[${sourceLabel}]`];
-  if (qualityLabel) {
+  const qualityLabel = quality ?? 'Unknown';
+  const nameLines = [`GuIndex`];
+  if (qualityLabel !== 'Unknown') {
     nameLines.push(qualityLabel);
+  } else {
+    nameLines.push('Auto');
   }
 
   const rawIndexer = this.extractIndexerRawName(torrent);
