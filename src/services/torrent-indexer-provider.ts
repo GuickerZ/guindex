@@ -1752,40 +1752,56 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     const seenTitles = Array.from(new Set(targetTitles.map((t) => this.sanitizeQuery(t)).filter(Boolean) as string[]));
     const limitedTitles = seenTitles.slice(0, 6);
 
+    // Extracao de todas as variantes de titulos
+    const allTitles: string[] = [];
     for (const baseTitle of limitedTitles) {
-      const titleVariants = this.buildLocaleTitleVariants(baseTitle).slice(0, 5);
-      for (const title of titleVariants) {
-        if (type.toLowerCase() === 'movie') {
-          add(title);
-          if (releaseYear) {
-            add(`${title} ${releaseYear}`);
-          }
-          continue;
-        }
+      allTitles.push(...this.buildLocaleTitleVariants(baseTitle).slice(0, 5));
+    }
+    const uniqueTitles = [...new Set(allTitles)];
 
-        add(title);
+    if (type.toLowerCase() === 'movie') {
+      uniqueTitles.forEach(title => add(title));
+      if (releaseYear) {
+        uniqueTitles.forEach(title => add(`${title} ${releaseYear}`));
+      }
+    } else {
+      // SERIES - Ordem otimizada por estilo para alternar entre idiomas!
+      const s = parsed.season;
+      const e = parsed.episode;
+      const sPad = s !== undefined ? String(s).padStart(2, '0') : undefined;
+      const ePad = e !== undefined ? String(e).padStart(2, '0') : undefined;
 
-        if (parsed.season !== undefined) {
-          const s = parsed.season;
-          const sPad = String(s).padStart(2, '0');
-          add(`${title} S${sPad}`);
-          add(`${title} temporada ${s}`);
+      // Estilo 1: SxxEyy (Ex: Invencivel S02E03, Invincible S02E03)
+      if (sPad !== undefined && ePad !== undefined) {
+        uniqueTitles.forEach(title => add(`${title} S${sPad}E${ePad}`));
+      }
 
-          if (parsed.episode !== undefined) {
-            const e = parsed.episode;
-            const ePad = String(e).padStart(2, '0');
-            add(`${title} S${sPad}E${ePad}`);
-            add(`${title} temporada ${s} episodio ${e}`);
-            add(`${title} ${s}x${ePad}`);
-          }
-        }
+      // Estilo 2: Sxx (Packs de Temporada)
+      if (sPad !== undefined) {
+        uniqueTitles.forEach(title => add(`${title} S${sPad}`));
+      }
 
-        if (episodeTitle) {
-          add(`${title} ${episodeTitle}`);
-        }
-        if (releaseYear) {
-          add(`${title} ${releaseYear}`);
-        }
+      // Estilo 3: temporada x
+      if (s !== undefined) {
+        uniqueTitles.forEach(title => add(`${title} temporada ${s}`));
+      }
+
+      // Estilo 4: temporada x episodio y
+      if (s !== undefined && e !== undefined) {
+        uniqueTitles.forEach(title => add(`${title} temporada ${s} episodio ${e}`));
+      }
+
+      // Estilo 5: Titulo + Nome do Episodio
+      if (episodeTitle) {
+        uniqueTitles.forEach(title => add(`${title} ${episodeTitle}`));
+      }
+
+      // Estilo 6: Titulo Puro (Ex: Invencivel, Invincible) - Fallback Universal
+      uniqueTitles.forEach(title => add(title));
+
+      // Estilo 7: Titulo + Ano
+      if (releaseYear) {
+        uniqueTitles.forEach(title => add(`${title} ${releaseYear}`));
       }
     }
 
