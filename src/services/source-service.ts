@@ -12,25 +12,25 @@ export class SourceService {
     id: string,
     options?: SourceFetchOptions
   ): Promise<SourceStream[]> {
-    console.log(`Fetching streams from ${SOURCES.length} sources in parallel...`);
+    console.info(`[GuIndex] 🚀 Iniciando busca paralela em ${SOURCES.length} provedores (incluindo Torrent Indexer)...`);
     
     
     const results = await Promise.all(
       SOURCES.map(async (source) => {
-        console.log(`🔍 Fetching streams from ${source.name}...`);
+        console.info(`[GuIndex] 📡 Acionando provedor: ${source.name}...`);
         try {
           const streams = await source.getStreams(type, id, options);
-          console.log(`✅ Found ${streams.length} streams from ${source.name}`);
+          console.info(`[GuIndex] ✅ Sucesso: ${source.name} retornou ${streams.length} streams.`);
           return { source: source.name, streams };
         } catch (error) {
-          console.warn(`❌ Failed to fetch from ${source.name}:`, error);
+          console.warn(`[GuIndex] ❌ Falha crítica no provedor ${source.name}:`, error);
           return { source: source.name, streams: [] };
         }
       })
     );
     
         
-    console.log(`🎬 Total streams found: ${results.length}`);
+    console.info(`[GuIndex] 🏁 Busca nos provedores concluída. Total de pacotes de provedores: ${results.length}`);
     return results.flatMap(result => result.streams);
   }
 }

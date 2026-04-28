@@ -20,7 +20,7 @@ export class StreamController {
     const { type, id, extra } = args;
 
     try {
-      console.info(`Processing stream request: ${type}/${id}`);
+      console.info(`[GuIndex] 📥 Processando requisição de stream: ${type}/${id}`);
       
       // Fetch streams from all configured sources
       const debridSelection = StreamService.resolveDebridSelection({
@@ -51,18 +51,18 @@ export class StreamController {
       );
 
       if (processableStreams.length === 0) {
-        console.debug('No processable magnet streams were found');
+        console.info(`[GuIndex] ⚠️ Nenhum stream processável/magnet encontrado para ${type}/${id}`);
         return { streams: [] };
       }
 
-      console.debug(`Found ${processableStreams.length} processable streams`);
+      console.info(`[GuIndex] 🔄 Preparando ${processableStreams.length} streams brutos para verificação Debrid`);
 
       const availabilityStart = Date.now();
       await this.ensureDebridAvailability(processableStreams, selectedProvider, selectedToken);
-      console.debug(`Availability check took ${Date.now() - availabilityStart}ms`);
+      console.info(`[GuIndex] ⏱️ Verificação de cache no Debrid levou ${Date.now() - availabilityStart}ms`);
 
       if (!selectedToken) {
-        console.debug('No debrid token provided, returning magnet fallback streams');
+        console.info(`[GuIndex] ⚠️ Sem token Debrid. Retornando em modo fallback (Magnets diretos)`);
       }
 
       let streamMetadata: StremioStream[] = processableStreams
@@ -87,7 +87,7 @@ export class StreamController {
           }
 
           if (selectedProvider !== 'torbox' && !magnet) {
-            console.debug(`Skipping non-TorBox stream without magnet: ${stream.name ?? stream.title}`);
+            console.debug(`[GuIndex] ⏭️ Ignorando stream incompatível sem magnet: ${stream.name ?? stream.title}`);
             return undefined;
           }
 
@@ -125,7 +125,7 @@ export class StreamController {
         return bReady - aReady;
       });
 
-      console.debug(`Returning ${streamMetadata.length} streams with magnet links`);
+      console.info(`[GuIndex] 📤 Entrega final: ${streamMetadata.length} streams formatados enviados ao Stremio`);
       return { streams: streamMetadata };
       
     } catch (error) {

@@ -1888,6 +1888,12 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     for (const torrent of topTorrents) {
       const collected = this.collectTorrentTitles(torrent);
       for (const title of collected) {
+        // FILTER: Prevent full scene release names from being used as search queries.
+        // Doing so would cause useless slow-path queries that hit indexers with garbage strings.
+        if (/(1080p|720p|2160p|4k|x264|h264|x265|hevc|bluray|web-dl|webrip|hdtv|camrip|dublado|legendado|dual\s*audio|remux)/i.test(title)) {
+          continue;
+        }
+
         if (!titles.includes(title)) {
           titles.push(title);
         }
