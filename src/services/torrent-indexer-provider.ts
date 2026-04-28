@@ -392,6 +392,15 @@ interface MatchContext {
   targetTitles: string[];
   releaseYear?: number;
   episodeTitle?: string;
+  reqId?: string;
+  logName?: string;
+}
+
+export function logReq(context: MatchContext | undefined, message: string) {
+  const ts = new Date().toISOString();
+  const req = context?.reqId ? `[Req: ${context.reqId}]` : '';
+  const name = context?.logName ? `[${context.logName}]` : '';
+  console.info(`[${ts}] [GuIndex] ${req} ${name} ${message}`.replace(/\s+/g, ' '));
 }
 
 const BACKGROUND_WARM_DELAY_MS = 2000;
@@ -407,10 +416,10 @@ class GlobalIndexerQueue {
     this.concurrency = parsePositiveInt(process.env.TORRENT_INDEXER_GLOBAL_QUEUE_CONCURRENCY, 1);
   }
 
-  async add(task: () => Promise<void>, label: string) {
-    console.info(`[GuIndex] 📥 [Fila Global] Adicionado na fila: ${label}. Tamanho atual: ${this.queue.length + 1}`);
+  async add(task: () => Promise<void>, label: string, context?: MatchContext) {
+    logReq(context, `📥 [Fila Global] Adicionado na fila: ${label}. Tamanho atual: ${this.queue.length + 1}`);
     this.queue.push(async () => {
-      console.info(`[GuIndex] ⚙️ [Fila Global] Processando: ${label}`);
+      logReq(context, `⚙️ [Fila Global] Processando: ${label}`);
       try {
         await task();
       } catch (e) {
@@ -437,7 +446,7 @@ class GlobalIndexerQueue {
 
     this.activeWorkers--;
     if (this.activeWorkers === 0 && this.queue.length === 0) {
-      console.info(`[GuIndex] ✅ [Fila Global] Fila esvaziada! Servidor descansando.`);
+      logReq(undefined, `✅ [Fila Global] Fila esvaziada! Servidor descansando.`);
     }
   }
 }
@@ -598,10 +607,13 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       return [];
     }
 
+    const reqId = Math.random().toString(36).substring(2, 8).toUpperCase();
     const context: MatchContext = {
       parsed,
       type,
       targetTitles: displayTitles,
+      reqId,
+      logName: queries[1] || queries[0] || id,
     };
     if (releaseYear !== undefined) {
       context.releaseYear = releaseYear;
@@ -621,7 +633,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
       const rawTorrents = await this.fetchSearchResults(query, true, context);
       if (rawTorrents.length > 0) {
-        console.info(`[GuIndex] ⚡ Cache (Fase 1) retornou ${rawTorrents.length} resultados brutos para '${query}'. Analisando relevância...`);
+        logReq(context, `⚡ Cache (Fase 1) retornou ${rawTorrents.length} resultados brutos para '${query}'. Analisando relevância...`);
       }
       if (rawTorrents.length === 0) continue;
       
@@ -649,7 +661,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     }
 
     if (streams.length >= TARGET_STREAMS_PER_REQUEST && sourceCounts.size >= 2) {
-      console.info(`[GuIndex] ✅ Fase 1 (Cache) encontrou ${streams.length} streams finais para '${id}'. Atualizando DB no background.`);
+      logReq(context, `✅ Fase 1 (Cache) encontrou ${streams.length} streams finais para '${id}'. Atualizando DB no background.`);
       this.warmRemainingQueriesInBackground(queries, context);
       
       if (streams.length === 0) return streams;
@@ -658,9 +670,9 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     }
 
     if (streams.length > 0) {
-      console.info(`[GuIndex] ⚠️ Fase 1 (Cache) encontrou apenas ${streams.length} streams relevantes. Iniciando Fase 2 (Slow-path) para buscar mais...`);
+      logReq(context, `⚠️ Fase 1 (Cache) encontrou apenas ${streams.length} streams relevantes. Iniciando Fase 2 (Slow-path) para buscar mais...`);
     } else {
-      console.info(`[GuIndex] ⚠️ Fase 1 (Cache) não encontrou nenhum stream relevante. Iniciando Fase 2 (Slow-path) ao vivo...`);
+      logReq(context, `⚠️ Fase 1 (Cache) não encontrou nenhum stream relevante. Iniciando Fase 2 (Slow-path) ao vivo...`);
     }
 
     let attemptedQueries = 0;
@@ -717,7 +729,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
     await this.decorateWithDebrid(streams, options);
 
-    console.info(`[GuIndex] ✅ Retornando ${streams.length} streams finais para '${id}'`);
+    logReq(context, `✅ Retornando ${streams.length} streams finais para '${id}'`);
     return streams;
   }
 
@@ -863,7 +875,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
         const ranked = this.rankTorrentsByQuery(searchResults, query);
         TorrentIndexerProvider.searchCache.set(cacheKey, { ts: Date.now(), data: ranked });
         
-        this.warmIndexerCacheInBackground(query, ranked);
+        this.warmIndexerCacheInBackground(query, ranked, context);
         
         return ranked;
       }
@@ -873,7 +885,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     const presentIndexers = this.collectIndexerSlugs(searchResults);
     const indexerResults = await this.fetchSearchResultsFromIndexers(query, {
       excludeIndexers: presentIndexers.size > 0 ? presentIndexers : undefined,
-    });
+    }, context);
 
     const merged = this.rankTorrentsByQuery(
       this.mergeTorrentResults(searchResults, indexerResults),
@@ -911,21 +923,21 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     const uniqueIndexers = this.collectIndexerSlugs(relevantResults);
     const isSufficient = uniqueIndexers.size >= TorrentIndexerProvider.HYBRID_MIN_INDEXERS;
     if (isSufficient) {
-      console.info(`[GuIndex] ⚡ Fast-path aprovou '${query}': ${relevantResults.length} resultados válidos em ${uniqueIndexers.size} indexadores.`);
+      logReq(context, `⚡ Fast-path aprovou '${query}': ${relevantResults.length} resultados válidos em ${uniqueIndexers.size} indexadores.`);
     }
     return isSufficient;
   }
 
-  private warmIndexerCacheInBackground(query: string, existingResults: TorrentLike[]): void {
+  private warmIndexerCacheInBackground(query: string, existingResults: TorrentLike[], context?: MatchContext): void {
     globalQueue.add(async () => {
-      await this.fetchSearchResultsFromIndexers(query);
-    }, `Atualização de Fundo para '${query}'`);
+      await this.fetchSearchResultsFromIndexers(query, undefined, context);
+    }, `Atualização de Fundo para '${query}'`, context);
   }
 
   private warmRemainingQueriesInBackground(queries: string[], context: MatchContext): void {
     if (queries.length === 0) return;
 
-    console.info(`[GuIndex] 🔍 Enviando ${queries.length} queries para a Fila Global de raspagem em background.`);
+    logReq(context, `🔍 Enviando ${queries.length} queries para a Fila Global de raspagem em background.`);
     
     for (const query of queries) {
       if (!query) continue;
@@ -937,14 +949,15 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
           return;
         }
 
-        await this.fetchSearchResultsFromIndexers(query);
-      }, `Raspagem Restante '${query}'`);
+        await this.fetchSearchResultsFromIndexers(query, undefined, context);
+      }, `Raspagem Restante '${query}'`, context);
     }
   }
 
   private async fetchSearchResultsWithRetry(
     query: string,
     options?: FallbackSearchOptions,
+    context?: MatchContext,
   ): Promise<TorrentLike[]> {
     const variants = this.buildSearchRetryQueries(query);
     let merged: TorrentLike[] = [];
@@ -956,7 +969,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       }
       const results = await this.fetchSearchResultsFromIndexers(variant, {
         ...options,
-      });
+      }, context);
       merged = this.mergeTorrentResults(merged, results);
 
       const reachedTarget =
@@ -973,6 +986,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
   private async fetchSearchResultsFromIndexers(
     query: string,
     options?: FallbackSearchOptions,
+    context?: MatchContext,
   ): Promise<TorrentLike[]> {
     if (!TorrentIndexerProvider.ENABLE_FALLBACK_INDEXER_SEARCH) {
       return [];
@@ -1010,7 +1024,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       return [];
     }
 
-    console.info(`[GuIndex] 🐢 Slow-path iniciado: Buscando '${query}' ao vivo em ${selected.length} indexadores.`);
+    logReq(context, `🐢 Slow-path iniciado: Buscando '${query}' ao vivo em ${selected.length} indexadores.`);
 
     const settled: PromiseSettledResult<TorrentLike[]>[] = [];
     for (let i = 0; i < selected.length; i += TorrentIndexerProvider.FALLBACK_INDEXER_CONCURRENCY) {
