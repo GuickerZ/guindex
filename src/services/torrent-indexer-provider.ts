@@ -460,7 +460,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
   );
   private static readonly DISABLED_INDEXERS = parseCsvSet(
     readEnv('TORRENT_INDEXER_DISABLED_INDEXERS'),
-    ['comando_torrents'],
+    ['comando_torrents', 'bludv', 'filme_torrent'],
   );
   private static readonly INDEXER_FAILURE_THRESHOLD = parsePositiveInt(
     readEnv('TORRENT_INDEXER_FAILURE_THRESHOLD', 'TORRENT_INDEXER_INDEXER_FAILURE_THRESHOLD'),
@@ -3564,7 +3564,9 @@ private mapTorrentToStream(
       decoded = raw;
     }
 
-    const cleaned = decoded.replace(/[-_.]/g, ' ').replace(/\s+/g, ' ').trim();
+    // Strip out parenthesis metadata like (eng) or (brazilian, eng)
+    const withoutParenthesis = decoded.replace(/\s*\([^)]*\)/g, '');
+    const cleaned = withoutParenthesis.replace(/[-_.]/g, ' ').replace(/\s+/g, ' ').trim();
     if (!cleaned) {
       return undefined;
     }
