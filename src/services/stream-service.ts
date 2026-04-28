@@ -499,6 +499,10 @@ export class StreamService {
     behaviorHints: StremioStreamBehaviorHints | undefined,
     url: string
   ): string | undefined {
+    if (stream.indexer && stream.indexer.trim()) {
+      return stream.indexer.trim();
+    }
+
     if (stream.source && stream.source.trim()) {
       return stream.source.trim();
     }

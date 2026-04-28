@@ -2637,11 +2637,15 @@ private mapTorrentToStream(
     nameLines.push(qualityLabel);
   }
 
+  const rawIndexer = this.extractIndexerRawName(torrent);
+  const indexerSlug = rawIndexer ? this.normalizeIndexerSlug(rawIndexer) : undefined;
+
   const stream: SourceStream = {
     name: nameLines.join('\n'),
     title: titleLines.join('\n'),
     fileName: this.buildStreamFileName(selectedFileName, rawTitle, displayTitle, torrent),
     source: sourceLabel,
+    indexer: indexerSlug,
     magnet,
     cached: false
   };
