@@ -489,9 +489,16 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     const displayTitles = this.collectMetaTitles(meta);
     if (parsed.imdbId) {
       const localizedTitles = await this.fetchLocalizedTitleCandidates(parsed.imdbId);
-      for (const title of localizedTitles) {
-        if (!displayTitles.includes(title)) {
-          displayTitles.push(title);
+      // Prioritize TMDB localized PT-BR titles by putting them at the FRONT of the search array!
+      // This ensures they are searched first, avoiding timeouts hitting English queries instead.
+      for (let i = localizedTitles.length - 1; i >= 0; i--) {
+        const title = localizedTitles[i];
+        if (title) {
+          const existingIdx = displayTitles.indexOf(title);
+          if (existingIdx !== -1) {
+            displayTitles.splice(existingIdx, 1);
+          }
+          displayTitles.unshift(title);
         }
       }
     }
@@ -555,65 +562,77 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     const streams: SourceStream[] = [];
     const sourceCounts = new Map<string, number>();
     const searchStartedAt = Date.now();
-    let attemptedQueries = 0;
-    let remainingDynamicQueries = MAX_DYNAMIC_QUERIES;
 
-    for (let queryIndex = 0; queryIndex < queries.length; queryIndex += 1) {
-      const query = queries[queryIndex] ?? '';
-      if (!query) {
-        continue;
-      }
+    for (const isFastPathPhase of [true, false]) {
+      let attemptedQueries = 0;
 
-      attemptedQueries += 1;
-      if (
-        Date.now() - searchStartedAt >= MAX_SEARCH_TIME_MS &&
-        (streams.length > 0 || attemptedQueries > 2)
-      ) {
-        break;
-      }
-
-      const torrents = this.rankTorrentsByQuery(await this.fetchSearchResults(query), query);
-
-      // Removed dynamic queries. The API (Cinemeta) already provides the best 
-      // possible localized and original titles. Generating new search queries 
-      // from raw torrent titles only creates garbage queries and slow-path bottlenecks.
-
-      for (const torrent of torrents) {
-        if (!this.isRelevantTorrent(torrent, context)) {
+      for (let queryIndex = 0; queryIndex < queries.length; queryIndex += 1) {
+        const query = queries[queryIndex] ?? '';
+        if (!query) {
           continue;
         }
 
-        const stream = this.mapTorrentToStream(torrent, targetTitle ?? query, context);
-        if (!stream) {
+        attemptedQueries += 1;
+        if (
+          !isFastPathPhase &&
+          Date.now() - searchStartedAt >= MAX_SEARCH_TIME_MS &&
+          (streams.length > 0 || attemptedQueries > 2)
+        ) {
+          break;
+        }
+
+        const rawTorrents = await this.fetchSearchResults(query, isFastPathPhase);
+        if (rawTorrents.length === 0) {
           continue;
         }
+        
+        const torrents = this.rankTorrentsByQuery(rawTorrents, query);
 
-        const dedupeKey = this.getDedupeKey(stream);
-        if (dedupeKey && seen.has(dedupeKey)) {
-          continue;
+        // Removed dynamic queries. The API (Cinemeta) already provides the best 
+        // possible localized and original titles. Generating new search queries 
+        // from raw torrent titles only creates garbage queries and slow-path bottlenecks.
+
+        for (const torrent of torrents) {
+          if (!this.isRelevantTorrent(torrent, context)) {
+            continue;
+          }
+
+          const stream = this.mapTorrentToStream(torrent, targetTitle ?? query, context);
+          if (!stream) {
+            continue;
+          }
+
+          const dedupeKey = this.getDedupeKey(stream);
+          if (dedupeKey && seen.has(dedupeKey)) {
+            continue;
+          }
+
+          const sourceKey = (stream.source ?? 'unknown').toLowerCase();
+          const sourceCount = sourceCounts.get(sourceKey) ?? 0;
+          if (sourceCount >= MAX_STREAMS_PER_SOURCE) {
+            continue;
+          }
+
+          streams.push(stream);
+          sourceCounts.set(sourceKey, sourceCount + 1);
+          if (dedupeKey) {
+            seen.add(dedupeKey);
+          }
+
+          if (streams.length >= MAX_STREAMS) {
+            console.info(`[GuIndex] ✅ Retornando limite máximo de ${streams.length} streams para '${id}'`);
+            return streams;
+          }
         }
 
-        const sourceKey = (stream.source ?? 'unknown').toLowerCase();
-        const sourceCount = sourceCounts.get(sourceKey) ?? 0;
-        if (sourceCount >= MAX_STREAMS_PER_SOURCE) {
-          continue;
-        }
-
-        streams.push(stream);
-        sourceCounts.set(sourceKey, sourceCount + 1);
-        if (dedupeKey) {
-          seen.add(dedupeKey);
-        }
-
-        if (streams.length >= MAX_STREAMS) {
-          console.info(`[GuIndex] ✅ Retornando limite máximo de ${streams.length} streams para '${id}'`);
-          return streams;
+        if (streams.length >= TARGET_STREAMS_PER_REQUEST && sourceCounts.size >= 2) {
+          const remainingQueries = queries.slice(queryIndex + 1);
+          this.warmRemainingQueriesInBackground(remainingQueries);
+          break;
         }
       }
 
       if (streams.length >= TARGET_STREAMS_PER_REQUEST && sourceCounts.size >= 2) {
-        const remainingQueries = queries.slice(queryIndex + 1);
-        this.warmRemainingQueriesInBackground(remainingQueries);
         break;
       }
     }
@@ -775,7 +794,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
   }
   
 
-  private async fetchSearchResults(query: string): Promise<TorrentLike[]> {
+  private async fetchSearchResults(query: string, fastPathOnly = false): Promise<TorrentLike[]> {
     const cacheKey = this.getSearchCacheKey(query);
     const cached = TorrentIndexerProvider.searchCache.get(cacheKey);
     if (cached && Date.now() - cached.ts < TorrentIndexerProvider.SEARCH_CACHE_TTL_MS) {
@@ -786,16 +805,19 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     // If it has enough results, return immediately for fast UX.
     const searchResults = await this.fetchMeilisearchResults(query);
 
-    if (this.hasSufficientResults(searchResults)) {
-      // Cache and return fast results immediately.
-      const ranked = this.rankTorrentsByQuery(searchResults, query);
-      TorrentIndexerProvider.searchCache.set(cacheKey, { ts: Date.now(), data: ranked });
+    if (fastPathOnly || this.hasSufficientResults(searchResults)) {
+      if (!fastPathOnly) {
+        // Cache and return fast results immediately.
+        const ranked = this.rankTorrentsByQuery(searchResults, query);
+        TorrentIndexerProvider.searchCache.set(cacheKey, { ts: Date.now(), data: ranked });
 
-      // Fire-and-forget: query /indexers in background to warm the Meilisearch
-      // cache with fresh data for next time, without blocking this response.
-      this.warmIndexerCacheInBackground(query, ranked);
+        // Fire-and-forget: query /indexers in background to warm the Meilisearch
+        // cache with fresh data for next time, without blocking this response.
+        this.warmIndexerCacheInBackground(query, ranked);
 
-      return ranked;
+        return ranked;
+      }
+      return searchResults;
     }
 
     // Phase 2: /search had insufficient results — query /indexers directly.
