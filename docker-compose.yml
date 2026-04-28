@@ -25,6 +25,8 @@ services:
       # - TORRENT_INDEXER_DISABLED_INDEXERS=comando_torrents,bludv,filme_torrent
       # - TORRENT_INDEXER_FAILURE_THRESHOLD=2
       # - TORRENT_INDEXER_FAILURE_COOLDOWN_MS=900000
+      # - TORRENT_INDEXER_GLOBAL_QUEUE_CONCURRENCY=1
+      # - TORRENT_INDEXER_GLOBAL_QUEUE_DELAY_MS=1500
       # OBRIGATÓRIO: defina o domínio público da sua instância
       # - BASE_URL=https://seu-dominio.com
     volumes:

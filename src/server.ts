@@ -2,6 +2,7 @@
  * GuIndex - Servidor Principal
  */
 
+import 'dotenv/config';
 import { setupRoutes } from './routes/routes.js';
 import { ConfigService } from './services/config-service.js';
 

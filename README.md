@@ -315,9 +315,8 @@ npm start
 
 | Variavel | Padrao | Descricao |
 |----------|--------|-----------|
-| `TORRENT_INDEXER_HYBRID_MIN_RESULTS` | `10` | Minimo de resultados do `/search` para pular a Fase 2 |
+| `TORRENT_INDEXER_HYBRID_MIN_RESULTS` | `2` | Minimo de resultados do `/search` para pular a Fase 2 |
 | `TORRENT_INDEXER_HYBRID_MIN_INDEXERS` | `2` | Minimo de fontes distintas no `/search` para pular a Fase 2 |
-| `TORRENT_INDEXER_HYBRID_TARGET_RESULTS` | `24` | Meta de resultados agregados na busca hibrida |
 
 #### Torrent Indexer — saude de fontes
 
@@ -326,6 +325,13 @@ npm start
 | `TORRENT_INDEXER_DISABLED_INDEXERS` | `comando_torrents` | Lista CSV de indexers desativados |
 | `TORRENT_INDEXER_FAILURE_THRESHOLD` | `2` | Falhas consecutivas antes de cooldown |
 | `TORRENT_INDEXER_FAILURE_COOLDOWN_MS` | `900000` | Tempo de cooldown apos falhas (15min) |
+
+### 🌍 Fila Global de Raspagem (Global Queue)
+
+| Variavel | Padrao | Descricao |
+|---|---|---|
+| `TORRENT_INDEXER_GLOBAL_QUEUE_CONCURRENCY` | `1` | Quantidade de raspagens em segundo plano simultaneas |
+| `TORRENT_INDEXER_GLOBAL_QUEUE_DELAY_MS` | `1500` | Tempo de descanso entre raspagens (ms) |
 
 #### Torrent Indexer — cache
 
@@ -372,14 +378,17 @@ TORRENT_INDEXER_MAX_DYNAMIC_QUERIES=10
 TORRENT_INDEXER_MAX_STREAMS_PER_SOURCE=50
 
 # Busca hibrida (Meilisearch fast-path)
-TORRENT_INDEXER_HYBRID_MIN_RESULTS=10
+TORRENT_INDEXER_HYBRID_MIN_RESULTS=2
 TORRENT_INDEXER_HYBRID_MIN_INDEXERS=2
-TORRENT_INDEXER_HYBRID_TARGET_RESULTS=24
 
-# Saude das fontes
+# Estabilidade e Resiliência
 TORRENT_INDEXER_DISABLED_INDEXERS=comando_torrents,bludv,filme_torrent
 TORRENT_INDEXER_FAILURE_THRESHOLD=2
 TORRENT_INDEXER_FAILURE_COOLDOWN_MS=900000
+
+# Fila Global de Fundo
+TORRENT_INDEXER_GLOBAL_QUEUE_CONCURRENCY=1
+TORRENT_INDEXER_GLOBAL_QUEUE_DELAY_MS=1500
 
 # Cache
 TORRENT_INDEXER_SEARCH_CACHE_TTL_MS=120000

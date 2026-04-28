@@ -394,6 +394,56 @@ interface MatchContext {
   episodeTitle?: string;
 }
 
+const BACKGROUND_WARM_DELAY_MS = 2000;
+
+class GlobalIndexerQueue {
+  private queue: Array<() => Promise<void>> = [];
+  private activeWorkers = 0;
+  private readonly delayMs: number;
+  private readonly concurrency: number;
+
+  constructor() {
+    this.delayMs = parseNonNegativeInt(process.env.TORRENT_INDEXER_GLOBAL_QUEUE_DELAY_MS, 1500);
+    this.concurrency = parsePositiveInt(process.env.TORRENT_INDEXER_GLOBAL_QUEUE_CONCURRENCY, 1);
+  }
+
+  async add(task: () => Promise<void>, label: string) {
+    console.info(`[GuIndex] 📥 [Fila Global] Adicionado na fila: ${label}. Tamanho atual: ${this.queue.length + 1}`);
+    this.queue.push(async () => {
+      console.info(`[GuIndex] ⚙️ [Fila Global] Processando: ${label}`);
+      try {
+        await task();
+      } catch (e) {
+        console.error(`[GuIndex] ❌ [Fila Global] Erro ao processar ${label}:`, e);
+      }
+    });
+    this.process();
+  }
+
+  private async process() {
+    if (this.activeWorkers >= this.concurrency) return;
+    this.activeWorkers++;
+
+    while (this.queue.length > 0) {
+      const task = this.queue.shift();
+      if (task) {
+        await task();
+        // Pequeno respiro configurável entre requisições para poupar a API
+        if (this.delayMs > 0) {
+          await new Promise(r => setTimeout(r, this.delayMs));
+        }
+      }
+    }
+
+    this.activeWorkers--;
+    if (this.activeWorkers === 0 && this.queue.length === 0) {
+      console.info(`[GuIndex] ✅ [Fila Global] Fila esvaziada! Servidor descansando.`);
+    }
+  }
+}
+
+const globalQueue = new GlobalIndexerQueue();
+
 export class TorrentIndexerProvider extends BaseSourceProvider {
   private readonly baseUrl: string;
 
@@ -448,15 +498,11 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
   );
   private static readonly HYBRID_MIN_RESULTS = parsePositiveInt(
     process.env.TORRENT_INDEXER_HYBRID_MIN_RESULTS,
-    10,
+    2,
   );
   private static readonly HYBRID_MIN_INDEXERS = parsePositiveInt(
     process.env.TORRENT_INDEXER_HYBRID_MIN_INDEXERS,
     2,
-  );
-  private static readonly HYBRID_TARGET_RESULTS = parsePositiveInt(
-    process.env.TORRENT_INDEXER_HYBRID_TARGET_RESULTS,
-    24,
   );
   private static readonly DISABLED_INDEXERS = parseCsvSet(
     readEnv('TORRENT_INDEXER_DISABLED_INDEXERS'),
@@ -570,7 +616,10 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       const query = queries[queryIndex] ?? '';
       if (!query) continue;
 
-      const rawTorrents = await this.fetchSearchResults(query, true);
+      const rawTorrents = await this.fetchSearchResults(query, true, context);
+      if (rawTorrents.length > 0) {
+        console.info(`[GuIndex] ⚡ Cache (Fase 1) retornou ${rawTorrents.length} resultados brutos para '${query}'. Analisando relevância...`);
+      }
       if (rawTorrents.length === 0) continue;
       
       const torrents = this.rankTorrentsByQuery(rawTorrents, query);
@@ -598,12 +647,18 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
     // Se a Fase 1 achou o suficiente, retornamos rápido e mandamos atualizar TUDO no background!
     if (streams.length >= TARGET_STREAMS_PER_REQUEST && sourceCounts.size >= 2) {
-      this.warmRemainingQueriesInBackground(queries);
+      this.warmRemainingQueriesInBackground(queries, context);
       
       if (streams.length === 0) return streams;
       await this.decorateWithDebrid(streams, options);
       console.info(`[GuIndex] ✅ Fase 1 (Cache) encontrou ${streams.length} streams finais para '${id}'. Atualizando DB no background.`);
       return streams;
+    }
+
+    if (streams.length > 0) {
+      console.info(`[GuIndex] ⚠️ Fase 1 (Cache) encontrou apenas ${streams.length} streams relevantes. Iniciando Fase 2 (Slow-path) para buscar mais...`);
+    } else {
+      console.info(`[GuIndex] ⚠️ Fase 1 (Cache) não encontrou nenhum stream relevante. Iniciando Fase 2 (Slow-path) ao vivo...`);
     }
 
     // PHASE 2: Slow-Path Sequencial
@@ -619,11 +674,11 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
         (streams.length > 0 || attemptedQueries > 2)
       ) {
         const remainingQueries = queries.slice(queryIndex);
-        this.warmRemainingQueriesInBackground(remainingQueries);
+        this.warmRemainingQueriesInBackground(remainingQueries, context);
         break;
       }
 
-      const rawTorrents = await this.fetchSearchResults(query, false);
+      const rawTorrents = await this.fetchSearchResults(query, false, context);
       if (rawTorrents.length === 0) continue;
       
       const torrents = this.rankTorrentsByQuery(rawTorrents, query);
@@ -651,7 +706,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
       if (streams.length >= TARGET_STREAMS_PER_REQUEST && sourceCounts.size >= 2) {
         const remainingQueries = queries.slice(queryIndex + 1);
-        this.warmRemainingQueriesInBackground(remainingQueries);
+        this.warmRemainingQueriesInBackground(remainingQueries, context);
         break;
       }
     }
@@ -813,7 +868,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
   }
   
 
-  private async fetchSearchResults(query: string, fastPathOnly = false): Promise<TorrentLike[]> {
+  private async fetchSearchResults(query: string, fastPathOnly = false, context: MatchContext): Promise<TorrentLike[]> {
     const cacheKey = this.getSearchCacheKey(query);
     const cached = TorrentIndexerProvider.searchCache.get(cacheKey);
     if (cached && Date.now() - cached.ts < TorrentIndexerProvider.SEARCH_CACHE_TTL_MS) {
@@ -822,10 +877,14 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
     const searchResults = await this.fetchMeilisearchResults(query);
 
-    if (fastPathOnly || this.hasSufficientResults(searchResults)) {
+    if (fastPathOnly || this.hasSufficientResults(searchResults, query, context)) {
       if (!fastPathOnly) {
         const ranked = this.rankTorrentsByQuery(searchResults, query);
         TorrentIndexerProvider.searchCache.set(cacheKey, { ts: Date.now(), data: ranked });
+        
+        // Manda o Slow-path rodar na fila global em background para atualizar/novas qualidades
+        this.warmIndexerCacheInBackground(query, ranked);
+        
         return ranked;
       }
       return searchResults;
@@ -869,14 +928,20 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
   /**
    * Check if /search results are sufficient to skip the slow /indexers path.
+   * Agora filtra por RELEVÂNCIA (isRelevantTorrent) para evitar falsos positivos do Meilisearch!
    */
-  private hasSufficientResults(results: TorrentLike[]): boolean {
+  private hasSufficientResults(results: TorrentLike[], query: string, context: MatchContext): boolean {
     if (results.length === 0) return false;
-    if (results.length < TorrentIndexerProvider.HYBRID_MIN_RESULTS) return false;
-    const uniqueIndexers = this.collectIndexerSlugs(results);
+    
+    // Filtra os resultados para ver se realmente temos links válidos
+    const relevantResults = results.filter(r => this.isRelevantTorrent(r, context));
+    
+    if (relevantResults.length < TorrentIndexerProvider.HYBRID_MIN_RESULTS) return false;
+    
+    const uniqueIndexers = this.collectIndexerSlugs(relevantResults);
     const isSufficient = uniqueIndexers.size >= TorrentIndexerProvider.HYBRID_MIN_INDEXERS;
     if (isSufficient) {
-      console.info(`[GuIndex] ⚡ Fast-path ativado: ${results.length} resultados encontrados de ${uniqueIndexers.size} indexadores.`);
+      console.info(`[GuIndex] ⚡ Fast-path aprovou '${query}': ${relevantResults.length} resultados válidos (de ${results.length} brutos) em ${uniqueIndexers.size} indexadores.`);
     }
     return isSufficient;
   }
@@ -887,42 +952,36 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
    * Meilisearch, so subsequent /search queries will find this content.
    */
   private warmIndexerCacheInBackground(query: string, existingResults: TorrentLike[]): void {
-    const presentIndexers = this.collectIndexerSlugs(existingResults);
-    // Don't await — this runs in background and populates the cache for next time.
-    this.fetchSearchResultsFromIndexers(query, {
-      excludeIndexers: presentIndexers.size > 0 ? presentIndexers : undefined,
-    }).catch(() => { /* swallow errors in background warming */ });
+    globalQueue.add(async () => {
+      // Background faz scrape COMPLETO (sem excludeIndexers) para buscar novas qualidades nos sites!
+      await this.fetchSearchResultsFromIndexers(query);
+    }, `Atualização de Fundo para '${query}'`);
   }
 
   /**
-   * Sequentially warms the cache for remaining query variations in the background.
-   * Awaits each request to prevent overloading FlareSolverr with concurrent batches.
+   * Sequentially warms the cache for remaining query variations in the background using Global Queue.
    */
-  private async warmRemainingQueriesInBackground(queries: string[]): Promise<void> {
-    // Only warm the top 2 remaining variations to avoid unnecessary load
-    const toWarm = queries.slice(0, 2);
-    if (toWarm.length > 0) {
-      console.info(`[GuIndex] 🔍 Fast-path engatilhou busca em segundo plano para ${toWarm.length} variações alternativas.`);
-    }
-    for (const query of toWarm) {
+  private warmRemainingQueriesInBackground(queries: string[], context: MatchContext): void {
+    if (queries.length === 0) return;
+
+    console.info(`[GuIndex] 🔍 Enviando ${queries.length} queries para a Fila Global de raspagem em background.`);
+    
+    for (const query of queries) {
       if (!query) continue;
-      try {
+      
+      globalQueue.add(async () => {
         const cacheKey = this.getSearchCacheKey(query);
         const cached = TorrentIndexerProvider.searchCache.get(cacheKey);
         if (cached && Date.now() - cached.ts < TorrentIndexerProvider.SEARCH_CACHE_TTL_MS) {
-          continue;
+          return;
         }
 
         const searchResults = await this.fetchMeilisearchResults(query);
-        const presentIndexers = this.collectIndexerSlugs(searchResults);
+        const relevantResults = searchResults.filter(r => this.isRelevantTorrent(r, context));
 
-        // Await each background batch to run sequentially
-        await this.fetchSearchResultsFromIndexers(query, {
-          excludeIndexers: presentIndexers.size > 0 ? presentIndexers : undefined,
-        });
-      } catch {
-        // swallow errors in background task
-      }
+        // Await each background batch to run sequentially. Sem excludeIndexers para atualização total!
+        await this.fetchSearchResultsFromIndexers(query);
+      }, `Raspagem Restante '${query}'`);
     }
   }
 
