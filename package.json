@@ -1,6 +1,6 @@
 {
   "name": "guindex",
-  "version": "2.1.6",
+  "version": "2.1.7",
   "description": "Addon Stremio para conteudo brasileiro - transforma resultados do torrent-indexer em streams diretos via Real-Debrid ou TorBox.",
   "main": "dist/server.js",
   "scripts": {
