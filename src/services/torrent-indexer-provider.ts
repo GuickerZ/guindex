@@ -2587,83 +2587,82 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     return undefined;
   }
 
-private mapTorrentToStream(
-  torrent: TorrentLike,
-  fallbackTitle: string,
-  context: MatchContext
-): SourceStream | undefined {
-  if (!torrent || typeof torrent !== 'object') {
-    return undefined;
-  }
+  private mapTorrentToStream(
+    torrent: TorrentLike,
+    fallbackTitle: string,
+    context: MatchContext
+  ): SourceStream | undefined {
+    if (!torrent || typeof torrent !== 'object') {
+      return undefined;
+    }
 
-  const magnet = this.extractMagnet(torrent);
-  if (!magnet) {
-    return undefined;
-  }
+    const magnet = this.extractMagnet(torrent);
+    if (!magnet) {
+      return undefined;
+    }
 
-  const totalSize = this.extractSize(torrent);
-  if (typeof totalSize === 'number' && totalSize > 0 && totalSize < TorrentIndexerProvider.MIN_VIDEO_SIZE) {
-    return undefined;
-  }
+    const totalSize = this.extractSize(torrent);
+    if (typeof totalSize === 'number' && totalSize > 0 && totalSize < TorrentIndexerProvider.MIN_VIDEO_SIZE) {
+      return undefined;
+    }
 
-  const rawTitle = this.extractTitle(torrent) || fallbackTitle || `${this.name} Torrent`;
-  const detailUrl = this.extractDetailUrl(torrent);
+    const rawTitle = this.extractTitle(torrent) || fallbackTitle || `${this.name} Torrent`;
+    const detailUrl = this.extractDetailUrl(torrent);
 
-  const sourceLabel =
-    this.extractSourceDomain(torrent) ||
-    this.extractIndexerName(torrent) ||
-    this.titleize(this.name);
+    const sourceLabel =
+      this.extractSourceDomain(torrent) ||
+      this.extractIndexerName(torrent) ||
+      this.titleize(this.name);
 
-  const selectedFile = this.selectBestTorrentFile(torrent, context);
-  const selectedFileName = selectedFile?.path;
-  const fileIdx = selectedFile?.originalIndex;
+    const selectedFile = this.selectBestTorrentFile(torrent, context);
+    const selectedFileName = selectedFile?.path;
+    const fileIdx = selectedFile?.originalIndex;
 
-  let displayTitle: string;
-  if (selectedFileName) {
-    const basename = selectedFileName.replace(/^.*[\\/]/, '');
-    displayTitle = this.cleanIndexerTitle(basename);
-  } else {
-    displayTitle = this.cleanIndexerTitle(this.buildDisplayTitle(torrent, rawTitle));
-  }
+    let displayTitle: string;
+    if (selectedFileName) {
+      const basename = selectedFileName.replace(/^.*[\\/]/, '');
+      displayTitle = this.cleanIndexerTitle(basename);
+    } else {
+      displayTitle = this.cleanIndexerTitle(this.buildDisplayTitle(torrent, rawTitle));
+    }
 
-  const rawSize = selectedFile?.size ?? this.extractSize(torrent);
-  const size = typeof rawSize === 'number' ? rawSize : this.parseSizeString(rawSize);
+    const rawSize = selectedFile?.size ?? this.extractSize(torrent);
+    const size = typeof rawSize === 'number' ? rawSize : this.parseSizeString(rawSize);
 
-  const releaseYear = this.extractYear(torrent);
-  const rawQuality =
-    (torrent as Record<string, unknown>).quality ||
-    (torrent as Record<string, unknown>).resolution ||
-    this.inferQualityFromTitle(displayTitle) ||
-    this.inferQualityFromTitle(rawTitle);
-  const quality = this.normalizeQuality(rawQuality);
-  const releaseGroup =
-    (torrent as Record<string, unknown>).releaseGroup ||
-    (torrent as Record<string, unknown>).group ||
-    (torrent as Record<string, unknown>).uploader ||
-    (torrent as Record<string, unknown>).source;
+    const seeds = this.extractSeeders(torrent);
+    const seedCount = seeds !== undefined ? Math.max(0, Math.floor(seeds)) : 0;
 
-  const seeds = this.extractSeeders(torrent);
-  const seedCount = seeds !== undefined ? Math.max(0, Math.floor(seeds)) : 0;
+    const infoSegments: string[] = [`Seeders: ${seedCount}`];
+    if (size !== undefined && size > 0) {
+      infoSegments.push(`Size: ${this.formatSize(size)}`);
+    }
+    infoSegments.push(`[${sourceLabel}]`);
 
-  const infoSegments: string[] = [`ðŸ‘¤ ${seedCount}`];
-  if (size !== undefined && size > 0) {
-    infoSegments.push(`ðŸ’¾ ${this.formatSize(size)}`);
-  }
-  infoSegments.push(`âš™ï¸ [${sourceLabel}]`);
+    const rawQuality =
+      (torrent as Record<string, unknown>).quality ||
+      (torrent as Record<string, unknown>).resolution ||
+      this.inferQualityFromTitle(displayTitle) ||
+      this.inferQualityFromTitle(rawTitle);
+    const quality = this.normalizeQuality(rawQuality);
+    const releaseGroup =
+      (torrent as Record<string, unknown>).releaseGroup ||
+      (torrent as Record<string, unknown>).group ||
+      (torrent as Record<string, unknown>).uploader ||
+      (torrent as Record<string, unknown>).source;
 
-  const audioLine = this.formatAudioLine(torrent);
-  const languages = this.extractAudioLanguages(torrent);
+    const audioLine = this.formatAudioLine(torrent);
+    const languages = this.extractAudioLanguages(torrent);
 
-  const headline = displayTitle;
-  const titleLines = [headline];
-  if (infoSegments.some((segment) => segment.trim().length > 0)) {
-    titleLines.push(infoSegments.join(' | '));
-  }
-  if (audioLine) {
-    titleLines.push(audioLine);
-  }
+    const headline = displayTitle;
+    const titleLines = [headline];
+    if (infoSegments.some((segment) => segment.trim().length > 0)) {
+      titleLines.push(infoSegments.join(' | '));
+    }
+    if (audioLine) {
+      titleLines.push(audioLine);
+    }
 
-  const qualityLabel = quality ?? 'Unknown';
+    const qualityLabel = quality ?? 'Unknown';
   const nameLines = [`GuIndex`];
   if (qualityLabel !== 'Unknown') {
     nameLines.push(qualityLabel);
@@ -3214,23 +3213,23 @@ private mapTorrentToStream(
     'bludv-v1.xyz': 'BluDV',
     'bludv.tv': 'BluDV',
     'bludv.in': 'BluDV',
-    'redetorrent.com': 'RedeTorrent',
-    'vacatorrent.com': 'VacaTorrent',
-    'vacatorrentmov.com': 'VacaTorrent',
+    'redetorrent.com': 'Rede Torrent',
+    'vacatorrent.com': 'Vaca Torrent',
+    'vacatorrentmov.com': 'Vaca Torrent',
     'lapumia.org': 'LAPUMiA',
-    'ondebaixa.com': 'OndeBaixa',
-    'torrentdosfilmes.se': 'TorrentDosFilmes',
-    'torrentdosfilmes.net': 'TorrentDosFilmes',
-    'torrentdosfilmes.com': 'TorrentDosFilmes',
-    'torrentdosfilmes.tv': 'TorrentDosFilmes',
-    'torrentdosfilmes.site': 'TorrentDosFilmes',
-    'thepiratefilmes.com': 'ThePirateFilmes',
-    'starckfilmes.com': 'StarckFilmes',
-    'torrentmovies.co': 'TorrentMovies',
-    'sitedetorrents.com': 'SiteDeTorrents',
+    'ondebaixa.com': 'Onde Baixa',
+    'torrentdosfilmes.se': 'Torrent dos Filmes',
+    'torrentdosfilmes.net': 'Torrent dos Filmes',
+    'torrentdosfilmes.com': 'Torrent dos Filmes',
+    'torrentdosfilmes.tv': 'Torrent dos Filmes',
+    'torrentdosfilmes.site': 'Torrent dos Filmes',
+    'thepiratefilmes.com': 'The Pirate Filmes',
+    'starckfilmes.com': 'Starck Filmes',
+    'torrentmovies.co': 'Torrent Movies',
+    'sitedetorrents.com': 'Site de Torrents',
     'ytsbr.com': 'YTSBR',
-    'limaotorrent.org': 'LimÃ£oTorrent',
-    'baixarfilmetorrent.net': 'BaixarFilme',
+    'limaotorrent.org': 'LimÃ£o Torrent',
+    'baixarfilmetorrent.net': 'Baixar Filme',
     'thepiratebay.org': 'TPB',
     'rarbg.to': 'RARBG',
     '1337x.to': '1337x',
@@ -3327,7 +3326,26 @@ private mapTorrentToStream(
       record.site;
 
     if (typeof candidate === 'string' && candidate.trim()) {
-      const sanitized = this.sanitizeQuery(candidate) ?? candidate.trim();
+      const val = candidate.trim();
+      
+      // Se parecer uma URL ou domínio, tenta tratar como tal primeiro
+      if (val.includes('.') || val.includes('/') || val.includes(':')) {
+        const hostname = this.parseHostname(val);
+        if (hostname) {
+          const baseHost = hostname.replace(/^(www\.)?/, '').replace(/-v\d+/, '').replace(/\d+\./, '.');
+          const mapped = TorrentIndexerProvider.SITE_LABEL_MAP[hostname]
+            ?? TorrentIndexerProvider.SITE_LABEL_MAP[baseHost];
+            
+          if (mapped) return mapped;
+          
+          const mainPart = baseHost.split('.')[0];
+          if (mainPart && mainPart.length > 2) {
+            return mainPart.charAt(0).toUpperCase() + mainPart.slice(1);
+          }
+        }
+      }
+
+      const sanitized = this.sanitizeQuery(val) ?? val;
       return this.titleize(sanitized);
     }
 
