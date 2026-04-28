@@ -1109,6 +1109,20 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     return names;
   }
 
+  /**
+   * Domain → indexer slug mapping for /search results that lack an explicit
+   * indexer field.  We extract the indexer identity from the "details" URL.
+   */
+  private static readonly DOMAIN_TO_INDEXER: Record<string, string> = {
+    'torrentdosfilmes': 'torrent-dos-filmes',
+    'starckfilmes': 'starck-filmes',
+    'vacatorrent': 'vaca_torrent',
+    'redetorrent': 'rede_torrent',
+    'comandotorrents': 'comando_torrents',
+    'bludv': 'bludv',
+    'filmetorrent': 'filme_torrent',
+  };
+
   private extractIndexerRawName(torrent: TorrentLike): string | undefined {
     const record = torrent as Record<string, unknown>;
     const candidate =
@@ -1120,11 +1134,28 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       record.origin ||
       record.site;
 
-    if (typeof candidate !== 'string') {
-      return undefined;
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim();
     }
 
-    return candidate.trim() || undefined;
+    // Fallback: infer indexer from the "details" URL domain.
+    // /search (Meilisearch) results don't have an explicit indexer field,
+    // but they always include a details URL like
+    // "https://torrentdosfilmes-v2.xyz/..." or "https://www.starckfilmes-v14.com/..."
+    const detailsUrl = record.details;
+    if (typeof detailsUrl === 'string' && detailsUrl.startsWith('http')) {
+      try {
+        const host = new URL(detailsUrl).hostname.replace(/^www\./, '');
+        // Strip version suffixes (e.g. "-v2", "-v14") and TLD to get base name
+        const baseDomain = host.replace(/\.[^.]+$/, '').replace(/-v?\d+$/, '').replace(/[.-]/g, '').toLowerCase();
+        const mapped = TorrentIndexerProvider.DOMAIN_TO_INDEXER[baseDomain];
+        if (mapped) return mapped;
+        // If no mapping, use the cleaned domain as-is
+        return baseDomain || undefined;
+      } catch { /* ignore invalid URLs */ }
+    }
+
+    return undefined;
   }
 
   private normalizeIndexerSlug(value: string): string {
@@ -1679,6 +1710,16 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     const base = this.sanitizeQuery(title);
     if (!base) {
       return out;
+    }
+
+    // Strip leading articles (The, A, An, O, Os, A, As) FIRST so the cleaner
+    // query gets priority — many BR indexers match poorly with articles.
+    const strippedArticle = base
+      .replace(/^(the|a|an|o|os|as)\s+/i, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (strippedArticle && strippedArticle !== base) {
+      add(strippedArticle);
     }
 
     add(base);
