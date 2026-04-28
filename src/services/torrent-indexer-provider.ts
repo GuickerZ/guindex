@@ -39,7 +39,50 @@ interface CinemetaMeta {
   [key: string]: unknown;
 }
 
-type TorrentLike = Record<string, unknown>;
+/**
+ * Typed shape of a torrent result from the indexer API.
+ * Both /search (Meilisearch) and /indexers/{name} return this shape.
+ * Fields are optional because different sources may omit some of them.
+ */
+interface TorrentResult {
+  title?: string;
+  original_title?: string;
+  details?: string;
+  year?: string | number;
+  imdb?: string;
+  audio?: string[];
+  magnet_link?: string;
+  date?: string;
+  info_hash?: string;
+  trackers?: string[] | null;
+  size?: string | number;
+  leech_count?: number;
+  seed_count?: number;
+  similarity?: number;
+  /** Present on /indexers results but NOT on /search results */
+  indexer?: string;
+  indexerName?: string;
+  indexer_name?: string;
+  source?: string;
+  provider?: string;
+  origin?: string;
+  site?: string;
+  /** File list for multi-file torrents */
+  files?: Array<{
+    path?: string;
+    name?: string;
+    size?: number | string;
+    length?: number;
+    index?: number;
+  }>;
+  [key: string]: unknown;
+}
+
+/**
+ * Keep the loose alias so the 200+ existing method signatures don't break.
+ * New code should prefer TorrentResult for field access.
+ */
+type TorrentLike = TorrentResult & Record<string, unknown>;
 
 interface IndexedTorrentFile {
   path: string;
@@ -1712,13 +1755,16 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       return out;
     }
 
-    // Strip leading articles (The, A, An, O, Os, A, As) FIRST so the cleaner
+    // Strip leading articles (The, A, An, O, Os, As) FIRST so the cleaner
     // query gets priority — many BR indexers match poorly with articles.
+    // Guard: only strip if the remaining text has >= 2 words to avoid
+    // noisy queries like "100" from "The 100" or "Mente" from "A Mente".
     const strippedArticle = base
       .replace(/^(the|a|an|o|os|as)\s+/i, '')
       .replace(/\s+/g, ' ')
       .trim();
-    if (strippedArticle && strippedArticle !== base) {
+    const remainingWords = strippedArticle.split(/\s+/).length;
+    if (strippedArticle && strippedArticle !== base && remainingWords >= 2) {
       add(strippedArticle);
     }
 

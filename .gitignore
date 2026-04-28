@@ -48,3 +48,4 @@ tests/stremio-real-flow.test.mjs
 test-artifacts*
 
 .vercel
+package-lock.json

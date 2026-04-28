@@ -19,6 +19,8 @@ export interface SourceStream {
   detailUrl?: string;
   languages?: string[];
   source?: string;
+  /** Indexer slug that produced this result (e.g. 'torrent-dos-filmes') */
+  indexer?: string;
   url?: string;
   magnet?: string;
   infoHash?: string;
