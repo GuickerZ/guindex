@@ -627,6 +627,8 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       }
 
       if (streams.length >= TARGET_STREAMS_PER_REQUEST && sourceCounts.size >= 2) {
+        const remainingQueries = queries.slice(queryIndex + 1);
+        this.warmRemainingQueriesInBackground(remainingQueries);
         break;
       }
     }
@@ -867,6 +869,35 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     this.fetchSearchResultsFromIndexers(query, {
       excludeIndexers: presentIndexers.size > 0 ? presentIndexers : undefined,
     }).catch(() => { /* swallow errors in background warming */ });
+  }
+
+  /**
+   * Sequentially warms the cache for remaining query variations in the background.
+   * Awaits each request to prevent overloading FlareSolverr with concurrent batches.
+   */
+  private async warmRemainingQueriesInBackground(queries: string[]): Promise<void> {
+    // Only warm the top 2 remaining variations to avoid unnecessary load
+    const toWarm = queries.slice(0, 2);
+    for (const query of toWarm) {
+      if (!query) continue;
+      try {
+        const cacheKey = this.getSearchCacheKey(query);
+        const cached = TorrentIndexerProvider.searchCache.get(cacheKey);
+        if (cached && Date.now() - cached.ts < TorrentIndexerProvider.SEARCH_CACHE_TTL_MS) {
+          continue;
+        }
+
+        const searchResults = await this.fetchMeilisearchResults(query);
+        const presentIndexers = this.collectIndexerSlugs(searchResults);
+
+        // Await each background batch to run sequentially
+        await this.fetchSearchResultsFromIndexers(query, {
+          excludeIndexers: presentIndexers.size > 0 ? presentIndexers : undefined,
+        });
+      } catch {
+        // swallow errors in background task
+      }
+    }
   }
 
   private async fetchSearchResultsWithRetry(
