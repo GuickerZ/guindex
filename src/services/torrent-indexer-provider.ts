@@ -855,7 +855,11 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     if (results.length === 0) return false;
     if (results.length < TorrentIndexerProvider.HYBRID_MIN_RESULTS) return false;
     const uniqueIndexers = this.collectIndexerSlugs(results);
-    return uniqueIndexers.size >= TorrentIndexerProvider.HYBRID_MIN_INDEXERS;
+    const isSufficient = uniqueIndexers.size >= TorrentIndexerProvider.HYBRID_MIN_INDEXERS;
+    if (isSufficient) {
+      console.info(`[GuIndex] ⚡ Fast-path ativado: ${results.length} resultados encontrados de ${uniqueIndexers.size} indexadores.`);
+    }
+    return isSufficient;
   }
 
   /**
@@ -878,6 +882,9 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
   private async warmRemainingQueriesInBackground(queries: string[]): Promise<void> {
     // Only warm the top 2 remaining variations to avoid unnecessary load
     const toWarm = queries.slice(0, 2);
+    if (toWarm.length > 0) {
+      console.info(`[GuIndex] 🔍 Fast-path engatilhou busca em segundo plano para ${toWarm.length} variações alternativas.`);
+    }
     for (const query of toWarm) {
       if (!query) continue;
       try {
@@ -1184,18 +1191,33 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
   }
 
   /**
-   * Domain → indexer slug mapping for /search results that lack an explicit
-   * indexer field.  We extract the indexer identity from the "details" URL.
+   * Dynamically builds a Domain → Indexer Slug map by stripping non-alphanumeric
+   * characters from the known indexer slugs fetched from the backend.
    */
-  private static readonly DOMAIN_TO_INDEXER: Record<string, string> = {
-    'torrentdosfilmes': 'torrent-dos-filmes',
-    'starckfilmes': 'starck-filmes',
-    'vacatorrent': 'vaca_torrent',
-    'redetorrent': 'rede_torrent',
-    'comandotorrents': 'comando_torrents',
-    'bludv': 'bludv',
-    'filmetorrent': 'filme_torrent',
-  };
+  private getDomainToIndexerMap(): Record<string, string> {
+    const map: Record<string, string> = {
+      // Hardcoded fallbacks before cache is populated
+      'torrentdosfilmes': 'torrent-dos-filmes',
+      'starckfilmes': 'starck-filmes',
+      'vacatorrent': 'vaca_torrent',
+      'redetorrent': 'rede_torrent',
+      'comandotorrents': 'comando_torrents',
+      'bludv': 'bludv',
+      'filmetorrent': 'filme_torrent',
+    };
+
+    const cachedNames = TorrentIndexerProvider.indexerNamesCache?.names;
+    if (Array.isArray(cachedNames)) {
+      for (const name of cachedNames) {
+        const slug = this.normalizeIndexerSlug(name);
+        const baseDomain = slug.replace(/[^a-z0-9]/g, '');
+        if (baseDomain && !map[baseDomain]) {
+          map[baseDomain] = slug;
+        }
+      }
+    }
+    return map;
+  }
 
   private extractIndexerRawName(torrent: TorrentLike): string | undefined {
     const record = torrent as Record<string, unknown>;
@@ -1222,7 +1244,8 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
         const host = new URL(detailsUrl).hostname.replace(/^www\./, '');
         // Strip version suffixes (e.g. "-v2", "-v14") and TLD to get base name
         const baseDomain = host.replace(/\.[^.]+$/, '').replace(/-v?\d+$/, '').replace(/[.-]/g, '').toLowerCase();
-        const mapped = TorrentIndexerProvider.DOMAIN_TO_INDEXER[baseDomain];
+        const map = this.getDomainToIndexerMap();
+        const mapped = map[baseDomain];
         if (mapped) return mapped;
         // If no mapping, use the cleaned domain as-is
         return baseDomain || undefined;
