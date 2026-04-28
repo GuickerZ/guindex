@@ -620,6 +620,9 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       if (!query) continue;
 
       const rawTorrents = await this.fetchSearchResults(query, true, context);
+      if (rawTorrents.length > 0) {
+        console.info(`[GuIndex] ⚡ Cache (Fase 1) retornou ${rawTorrents.length} resultados brutos para '${query}'. Analisando relevância...`);
+      }
       if (rawTorrents.length === 0) continue;
       
       const torrents = this.rankTorrentsByQuery(rawTorrents, query);
@@ -646,11 +649,18 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     }
 
     if (streams.length >= TARGET_STREAMS_PER_REQUEST && sourceCounts.size >= 2) {
+      console.info(`[GuIndex] ✅ Fase 1 (Cache) encontrou ${streams.length} streams finais para '${id}'. Atualizando DB no background.`);
       this.warmRemainingQueriesInBackground(queries, context);
       
       if (streams.length === 0) return streams;
       await this.decorateWithDebrid(streams, options);
       return streams;
+    }
+
+    if (streams.length > 0) {
+      console.info(`[GuIndex] ⚠️ Fase 1 (Cache) encontrou apenas ${streams.length} streams relevantes. Iniciando Fase 2 (Slow-path) para buscar mais...`);
+    } else {
+      console.info(`[GuIndex] ⚠️ Fase 1 (Cache) não encontrou nenhum stream relevante. Iniciando Fase 2 (Slow-path) ao vivo...`);
     }
 
     let attemptedQueries = 0;
@@ -707,6 +717,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
     await this.decorateWithDebrid(streams, options);
 
+    console.info(`[GuIndex] ✅ Retornando ${streams.length} streams finais para '${id}'`);
     return streams;
   }
 
@@ -899,6 +910,9 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     
     const uniqueIndexers = this.collectIndexerSlugs(relevantResults);
     const isSufficient = uniqueIndexers.size >= TorrentIndexerProvider.HYBRID_MIN_INDEXERS;
+    if (isSufficient) {
+      console.info(`[GuIndex] ⚡ Fast-path aprovou '${query}': ${relevantResults.length} resultados válidos em ${uniqueIndexers.size} indexadores.`);
+    }
     return isSufficient;
   }
 
@@ -910,6 +924,8 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
   private warmRemainingQueriesInBackground(queries: string[], context: MatchContext): void {
     if (queries.length === 0) return;
+
+    console.info(`[GuIndex] 🔍 Enviando ${queries.length} queries para a Fila Global de raspagem em background.`);
     
     for (const query of queries) {
       if (!query) continue;
@@ -993,6 +1009,8 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     if (selected.length === 0) {
       return [];
     }
+
+    console.info(`[GuIndex] 🐢 Slow-path iniciado: Buscando '${query}' ao vivo em ${selected.length} indexadores.`);
 
     const settled: PromiseSettledResult<TorrentLike[]>[] = [];
     for (let i = 0; i < selected.length; i += TorrentIndexerProvider.FALLBACK_INDEXER_CONCURRENCY) {
