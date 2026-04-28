@@ -574,25 +574,9 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
       const torrents = this.rankTorrentsByQuery(await this.fetchSearchResults(query), query);
 
-      if (remainingDynamicQueries > 0 && streams.length < TARGET_STREAMS_PER_REQUEST) {
-        const dynamicQueries = this.collectDynamicQueryCandidates(
-          type,
-          parsed,
-          torrents,
-          releaseYear,
-          episodeTitle,
-        );
-
-        for (const dynamicQuery of dynamicQueries) {
-          if (remainingDynamicQueries <= 0) {
-            break;
-          }
-          if (!queries.includes(dynamicQuery)) {
-            queries.push(dynamicQuery);
-            remainingDynamicQueries -= 1;
-          }
-        }
-      }
+      // Removed dynamic queries. The API (Cinemeta) already provides the best 
+      // possible localized and original titles. Generating new search queries 
+      // from raw torrent titles only creates garbage queries and slow-path bottlenecks.
 
       for (const torrent of torrents) {
         if (!this.isRelevantTorrent(torrent, context)) {

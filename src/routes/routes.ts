@@ -18,8 +18,7 @@ const { addonBuilder } = stremioAddonSdk;
 
 export function setupRoutes() {
   const config = ConfigService.loadConfig();
-  const logger = pino({ level: config.logLevel });
-  const fastify = Fastify({ logger });
+  const fastify = Fastify({ logger: false });
 
   // Register CORS plugin
 
@@ -127,7 +126,7 @@ export function setupRoutes() {
       const result = await streamController.handleStreamRequest({ type, id, extra });
       reply.send(result);
     } catch (error) {
-      logger.error(`Stream endpoint error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error(`[GuIndex] ❌ Erro no endpoint de stream: ${error instanceof Error ? error.message : 'Unknown error'}`);
       reply.send({ streams: [] });
       return fastify;
     }
@@ -170,7 +169,7 @@ export function setupRoutes() {
       const result = await streamController.handleStreamRequest({ type, id, extra });
       reply.send(result);
     } catch (error) {
-      logger.error(`Stream endpoint error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error(`[GuIndex] ❌ Erro no endpoint de stream: ${error instanceof Error ? error.message : 'Unknown error'}`);
       reply.send({ streams: [] });
     }
   });
@@ -224,7 +223,7 @@ export function setupRoutes() {
       });
       reply.redirect(directUrl);
     } catch (error) {
-      logger.error(`Magnet processing error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error(`[GuIndex] ❌ Erro no processamento do magnet: ${error instanceof Error ? error.message : 'Unknown error'}`);
       reply.status(500).send({ error: 'Failed to process magnet link' });
     }
   };
@@ -267,7 +266,7 @@ export function setupRoutes() {
             return;
           }
           await handleResolveRequest(reply, token, undefined, originalUrl, provider, linkType, ctx);
-          logger.info({ route: 'resolve', provider, linkType, durMs: Date.now() - started }, 'resolve handled');
+          console.info(`[GuIndex] 🔗 Resolve (${provider}/${linkType}) finalizado em ${Date.now() - started}ms`);
           return;
         }
 
@@ -277,7 +276,7 @@ export function setupRoutes() {
         }
 
         await handleResolveRequest(reply, token, magnet, undefined, provider, linkType, ctx);
-        logger.info({ route: 'resolve', provider, linkType, durMs: Date.now() - started }, 'resolve handled');
+        console.info(`[GuIndex] 🔗 Resolve (${provider}/${linkType}) finalizado em ${Date.now() - started}ms`);
       }
     });
   };

@@ -11,7 +11,7 @@ const TORRENT_INDEXER_BASE_URL =
   'http://guindex.duckdns.org:8090';
 
 if (!process.env.TORRENT_INDEXER_URL) {
-  console.log('[GuIndex] Usando instancia padrao do torrent-indexer: http://guindex.duckdns.org:8090');
+  console.info('[GuIndex] 🌐 Usando instância padrão do Torrent-Indexer: http://guindex.duckdns.org:8090');
 }
 
 export const SOURCES: BaseSourceProvider[] = [

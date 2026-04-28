@@ -35,7 +35,6 @@ export class ConfigService {
       torboxStreamLimit
     };
 
-    console.log(`[GuIndex] port=${port} baseUrl=${normalizedBaseUrl}`);
     return config;
   }
 

@@ -11,10 +11,11 @@ async function startServer() {
 
   try {
     await fastify.listen({ port: config.port, host: '0.0.0.0' });
-    console.log(`[GuIndex] Rodando na porta ${config.port}`);
-    console.log(`[GuIndex] Base URL: ${config.baseUrl}`);
+    console.info(`[GuIndex] 🟢 Servidor principal iniciado!`);
+    console.info(`[GuIndex] 🔌 Rodando na porta: ${config.port}`);
+    console.info(`[GuIndex] 🌐 Base URL: ${config.baseUrl}`);
   } catch (error) {
-    console.error('[GuIndex] Falha ao iniciar servidor:', error);
+    console.error('[GuIndex] ❌ Falha ao iniciar servidor:', error);
     process.exit(1);
   }
 }
