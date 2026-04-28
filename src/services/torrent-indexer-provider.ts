@@ -2629,6 +2629,8 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     const rawSize = selectedFile?.size ?? this.extractSize(torrent);
     const size = typeof rawSize === 'number' ? rawSize : this.parseSizeString(rawSize);
 
+    const releaseYear = this.extractYear(torrent);
+
     const seeds = this.extractSeeders(torrent);
     const seedCount = seeds !== undefined ? Math.max(0, Math.floor(seeds)) : 0;
 
