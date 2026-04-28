@@ -622,6 +622,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
         }
 
         if (streams.length >= MAX_STREAMS) {
+          console.info(`[GuIndex] ✅ Retornando limite máximo de ${streams.length} streams para '${id}'`);
           return streams;
         }
       }
@@ -639,6 +640,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
     await this.decorateWithDebrid(streams, options);
 
+    console.info(`[GuIndex] ✅ Retornando ${streams.length} streams finais para '${id}'`);
     return streams;
   }
 
@@ -974,6 +976,8 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     if (selected.length === 0) {
       return [];
     }
+
+    console.info(`[GuIndex] 🐢 Slow-path iniciado: Buscando '${query}' ao vivo em ${selected.length} indexadores.`);
 
     const settled: PromiseSettledResult<TorrentLike[]>[] = [];
     for (let i = 0; i < selected.length; i += TorrentIndexerProvider.FALLBACK_INDEXER_CONCURRENCY) {
