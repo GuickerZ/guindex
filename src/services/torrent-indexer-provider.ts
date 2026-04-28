@@ -532,11 +532,17 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     const parsed = this.parseId(id);
     const metaLookupId = parsed.imdbId ?? parsed.query ?? (id || '').split(':')[0] ?? id;
     const meta = await this.fetchCinemetaMeta(type, metaLookupId);
-    const displayTitles = this.collectMetaTitles(meta);
+    let displayTitles = this.collectMetaTitles(meta);
+    
     if (parsed.imdbId) {
       const localizedTitles = await this.fetchLocalizedTitleCandidates(parsed.imdbId);
-      // Prioritize TMDB localized PT-BR titles by putting them at the FRONT of the search array!
-      // This ensures they are searched first, avoiding timeouts hitting English queries instead.
+      
+      if (type === 'series') {
+        const fallback = await this.fetchCinemetaMeta('series', parsed.imdbId);
+        if (fallback?.name) displayTitles.push(fallback.name);
+        if (fallback?.aliases) displayTitles.push(...fallback.aliases);
+      }
+
       for (let i = localizedTitles.length - 1; i >= 0; i--) {
         const title = localizedTitles[i];
         if (title) {
@@ -548,6 +554,8 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
         }
       }
     }
+
+    displayTitles = [...new Set(displayTitles)];
 
     if (parsed.query && !displayTitles.includes(parsed.query)) {
       displayTitles.push(parsed.query);
@@ -568,8 +576,6 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     if (imdbQuery) {
       queries.push(imdbQuery);
     }
-    // For series, add an S-code query (e.g. "Better Call Saul S02E01") which
-    // tends to return better results from Brazilian indexers than the textual form.
     if (type.toLowerCase() !== 'movie' && parsed.season !== undefined && targetTitle) {
       const sPad = String(parsed.season).padStart(2, '0');
       const eCode = parsed.episode !== undefined
@@ -609,17 +615,11 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     const sourceCounts = new Map<string, number>();
     const searchStartedAt = Date.now();
 
-    // PHASE 1: Fast-Path Sweep
-    // Quickly check Meilisearch cache for ALL queries to see if we already have enough streams
-    // across all variants (IMDB, PT-BR, Original) without blocking.
     for (let queryIndex = 0; queryIndex < queries.length; queryIndex += 1) {
       const query = queries[queryIndex] ?? '';
       if (!query) continue;
 
       const rawTorrents = await this.fetchSearchResults(query, true, context);
-      if (rawTorrents.length > 0) {
-        console.info(`[GuIndex] ⚡ Cache (Fase 1) retornou ${rawTorrents.length} resultados brutos para '${query}'. Analisando relevância...`);
-      }
       if (rawTorrents.length === 0) continue;
       
       const torrents = this.rankTorrentsByQuery(rawTorrents, query);
@@ -645,24 +645,14 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       if (streams.length >= MAX_STREAMS) break;
     }
 
-    // Se a Fase 1 achou o suficiente, retornamos rápido e mandamos atualizar TUDO no background!
     if (streams.length >= TARGET_STREAMS_PER_REQUEST && sourceCounts.size >= 2) {
       this.warmRemainingQueriesInBackground(queries, context);
       
       if (streams.length === 0) return streams;
       await this.decorateWithDebrid(streams, options);
-      console.info(`[GuIndex] ✅ Fase 1 (Cache) encontrou ${streams.length} streams finais para '${id}'. Atualizando DB no background.`);
       return streams;
     }
 
-    if (streams.length > 0) {
-      console.info(`[GuIndex] ⚠️ Fase 1 (Cache) encontrou apenas ${streams.length} streams relevantes. Iniciando Fase 2 (Slow-path) para buscar mais...`);
-    } else {
-      console.info(`[GuIndex] ⚠️ Fase 1 (Cache) não encontrou nenhum stream relevante. Iniciando Fase 2 (Slow-path) ao vivo...`);
-    }
-
-    // PHASE 2: Slow-Path Sequencial
-    // Não achamos o suficiente no cache. Precisamos raspar da web (lento).
     let attemptedQueries = 0;
     for (let queryIndex = 0; queryIndex < queries.length; queryIndex += 1) {
       const query = queries[queryIndex] ?? '';
@@ -717,7 +707,6 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
     await this.decorateWithDebrid(streams, options);
 
-    console.info(`[GuIndex] ✅ Retornando ${streams.length} streams finais para '${id}'`);
     return streams;
   }
 
@@ -730,7 +719,6 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       base = infoHash ? infoHash.toLowerCase() : stream.magnet;
     }
     if (!base) return undefined;
-    // Include fileIdx so different episodes from the same torrent pack aren't deduplicated
     return stream.fileIdx !== undefined && stream.fileIdx >= 0
       ? `${base}:${stream.fileIdx}`
       : base;
@@ -824,46 +812,28 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
   private applyDebridBadge(stream: SourceStream, provider: 'realdebrid' | 'torbox'): void {
     if (!stream) return;
-
-    const providerLabel = provider === 'torbox' ? 'TB' : 'RD';
-    const providerName = provider === 'torbox' ? 'Torbox' : 'Real-Debrid';
   
-    // name: adiciona "âš¡ RD+" na primeira linha (substitui/remenda RD existente)
     if (typeof stream.name === 'string' && stream.name.length > 0) {
       const nameLines = stream.name.split('\n');
       const firstLine = nameLines[0] ?? '';
   
-      // remove marcas antigas
       let cleaned = firstLine
         .replace(/\[RD\]/gi, '')
         .replace(/RD\+/gi, '')
         .replace(/\bRD\b/gi, '')
         .replace(/\[TB\]/gi, '')
-        .replace(/TB\+/gi, '')
-        .replace(/\bTB\b/gi, '')
+        .replace(/\[?GuIndex\]?/gi, '')
         .trim();
+        
+      if (!cleaned) cleaned = 'GuIndex';
   
-      // prefixa com âš¡ RD+/TB+
-      nameLines[0] = `âš¡ ${providerLabel}+ ${cleaned}`.trim();
+      const qualityStr = nameLines.slice(1).join('\n');
   
-      stream.name = nameLines.join('\n');
-    }
-  
-    // title: adiciona [RD+]/[TB+] e linha "DisponÃ­vel no ..." se necessÃ¡rio
-    if (typeof stream.title === 'string' && stream.title.length > 0) {
-      const titleLines = stream.title.split('\n');
-      const firstLine = titleLines[0] ?? '';
-  
-      const badgeRegex = /\[(RD|TB)\+\]/i;
-      if (!badgeRegex.test(firstLine)) {
-        titleLines[0] = `${firstLine} [${providerLabel}+]`.trim();
+      if (provider === 'torbox') {
+        stream.name = `[TB] ${cleaned}\n${qualityStr}`.trim();
+      } else {
+        stream.name = `[RD+] ${cleaned}\n${qualityStr}`.trim();
       }
-  
-      if (!titleLines.some((line) => new RegExp(`Dispon[iÃ­]vel no ${providerName}`, 'i').test(line))) {
-        titleLines.push(`DisponÃ­vel no ${providerName}`);
-      }
-  
-      stream.title = titleLines.join('\n');
     }
   }
   
@@ -882,7 +852,6 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
         const ranked = this.rankTorrentsByQuery(searchResults, query);
         TorrentIndexerProvider.searchCache.set(cacheKey, { ts: Date.now(), data: ranked });
         
-        // Manda o Slow-path rodar na fila global em background para atualizar/novas qualidades
         this.warmIndexerCacheInBackground(query, ranked);
         
         return ranked;
@@ -890,8 +859,6 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       return searchResults;
     }
 
-    // Phase 2: /search had insufficient results — query /indexers directly.
-    // This is the slower path (5-12s) but necessary for uncached content.
     const presentIndexers = this.collectIndexerSlugs(searchResults);
     const indexerResults = await this.fetchSearchResultsFromIndexers(query, {
       excludeIndexers: presentIndexers.size > 0 ? presentIndexers : undefined,
@@ -906,9 +873,6 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     return merged;
   }
 
-  /**
-   * Fast Meilisearch query — typically <10ms for cached content.
-   */
   private async fetchMeilisearchResults(query: string): Promise<TorrentLike[]> {
     const url = new URL(`${this.baseUrl}/search`);
     url.searchParams.set('q', query);
@@ -926,45 +890,26 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     }
   }
 
-  /**
-   * Check if /search results are sufficient to skip the slow /indexers path.
-   * Agora filtra por RELEVÂNCIA (isRelevantTorrent) para evitar falsos positivos do Meilisearch!
-   */
   private hasSufficientResults(results: TorrentLike[], query: string, context: MatchContext): boolean {
     if (results.length === 0) return false;
     
-    // Filtra os resultados para ver se realmente temos links válidos
     const relevantResults = results.filter(r => this.isRelevantTorrent(r, context));
     
     if (relevantResults.length < TorrentIndexerProvider.HYBRID_MIN_RESULTS) return false;
     
     const uniqueIndexers = this.collectIndexerSlugs(relevantResults);
     const isSufficient = uniqueIndexers.size >= TorrentIndexerProvider.HYBRID_MIN_INDEXERS;
-    if (isSufficient) {
-      console.info(`[GuIndex] ⚡ Fast-path aprovou '${query}': ${relevantResults.length} resultados válidos (de ${results.length} brutos) em ${uniqueIndexers.size} indexadores.`);
-    }
     return isSufficient;
   }
 
-  /**
-   * Fire-and-forget background query to /indexers to warm the Meilisearch cache.
-   * The torrent-indexer backend automatically indexes all scraped results into
-   * Meilisearch, so subsequent /search queries will find this content.
-   */
   private warmIndexerCacheInBackground(query: string, existingResults: TorrentLike[]): void {
     globalQueue.add(async () => {
-      // Background faz scrape COMPLETO (sem excludeIndexers) para buscar novas qualidades nos sites!
       await this.fetchSearchResultsFromIndexers(query);
     }, `Atualização de Fundo para '${query}'`);
   }
 
-  /**
-   * Sequentially warms the cache for remaining query variations in the background using Global Queue.
-   */
   private warmRemainingQueriesInBackground(queries: string[], context: MatchContext): void {
     if (queries.length === 0) return;
-
-    console.info(`[GuIndex] 🔍 Enviando ${queries.length} queries para a Fila Global de raspagem em background.`);
     
     for (const query of queries) {
       if (!query) continue;
@@ -976,10 +921,6 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
           return;
         }
 
-        const searchResults = await this.fetchMeilisearchResults(query);
-        const relevantResults = searchResults.filter(r => this.isRelevantTorrent(r, context));
-
-        // Await each background batch to run sequentially. Sem excludeIndexers para atualização total!
         await this.fetchSearchResultsFromIndexers(query);
       }, `Raspagem Restante '${query}'`);
     }
@@ -1052,8 +993,6 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     if (selected.length === 0) {
       return [];
     }
-
-    console.info(`[GuIndex] 🐢 Slow-path iniciado: Buscando '${query}' ao vivo em ${selected.length} indexadores.`);
 
     const settled: PromiseSettledResult<TorrentLike[]>[] = [];
     for (let i = 0; i < selected.length; i += TorrentIndexerProvider.FALLBACK_INDEXER_CONCURRENCY) {
@@ -1270,13 +1209,8 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     return names;
   }
 
-  /**
-   * Dynamically builds a Domain → Indexer Slug map by stripping non-alphanumeric
-   * characters from the known indexer slugs fetched from the backend.
-   */
   private getDomainToIndexerMap(): Record<string, string> {
     const map: Record<string, string> = {
-      // Hardcoded fallbacks before cache is populated
       'torrentdosfilmes': 'torrent-dos-filmes',
       'starckfilmes': 'starck-filmes',
       'vacatorrent': 'vaca_torrent',
@@ -1314,20 +1248,14 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       return candidate.trim();
     }
 
-    // Fallback: infer indexer from the "details" URL domain.
-    // /search (Meilisearch) results don't have an explicit indexer field,
-    // but they always include a details URL like
-    // "https://torrentdosfilmes-v2.xyz/..." or "https://www.starckfilmes-v14.com/..."
     const detailsUrl = record.details;
     if (typeof detailsUrl === 'string' && detailsUrl.startsWith('http')) {
       try {
         const host = new URL(detailsUrl).hostname.replace(/^www\./, '');
-        // Strip version suffixes (e.g. "-v2", "-v14") and TLD to get base name
         const baseDomain = host.replace(/\.[^.]+$/, '').replace(/-v?\d+$/, '').replace(/[.-]/g, '').toLowerCase();
         const map = this.getDomainToIndexerMap();
         const mapped = map[baseDomain];
         if (mapped) return mapped;
-        // If no mapping, use the cleaned domain as-is
         return baseDomain || undefined;
       } catch { /* ignore invalid URLs */ }
     }
@@ -1835,13 +1763,8 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
           continue;
         }
 
-        // Always include the bare title first — many indexers (rede_torrent,
-        // vaca_torrent) don't support SxxEyy or "temporada" in search and
-        // return 0 when those are appended.  The bare title is the most
-        // universal query and should never be cut by the slice limit.
         add(title);
 
-        // Series: mix PT-BR wording and SxxEyy notation for better source coverage.
         if (parsed.season !== undefined) {
           const s = parsed.season;
           const sPad = String(s).padStart(2, '0');
@@ -1889,10 +1812,6 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       return out;
     }
 
-    // Strip leading articles (The, A, An, O, Os, As) FIRST so the cleaner
-    // query gets priority — many BR indexers match poorly with articles.
-    // Guard: only strip if the remaining text has >= 2 words to avoid
-    // noisy queries like "100" from "The 100" or "Mente" from "A Mente".
     const strippedArticle = base
       .replace(/^(the|a|an|o|os|as)\s+/i, '')
       .replace(/\s+/g, ' ')
@@ -1964,8 +1883,6 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     for (const torrent of topTorrents) {
       const collected = this.collectTorrentTitles(torrent);
       for (const title of collected) {
-        // FILTER: Prevent full scene release names from being used as search queries.
-        // Doing so would cause useless slow-path queries that hit indexers with garbage strings.
         if (/(1080p|720p|2160p|4k|x264|h264|x265|hevc|bluray|web-dl|webrip|hdtv|camrip|dublado|legendado|dual\s*audio|remux)/i.test(title)) {
           continue;
         }
@@ -2021,12 +1938,10 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     const normalizedType = type.toLowerCase();
     const imdb = this.extractImdb(torrent);
 
-    // If we only have an IMDb id and no title context, require IMDb metadata in the item.
     if (parsed.imdbId && !imdb && targetTitles.length === 0) {
       return false;
     }
 
-    // Title-based check: only for non-IMDB searches
     if (!parsed.imdbId || !imdb) {
       const torrentTitles = this.collectTorrentTitles(torrent);
       if (targetTitles.length > 0 && torrentTitles.length > 0) {
@@ -2037,8 +1952,6 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
         const effectiveTargets =
           normalizedAlphabeticTargets.length > 0 ? normalizedAlphabeticTargets : normalizedTargets;
 
-        // Avoid broad false positives for very short/ambiguous titles (e.g. "3%")
-        // when source items do not carry an IMDb id to confirm identity.
         if (effectiveTargets.length === 0) {
           return false;
         }
@@ -2071,28 +1984,23 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       }
     }
 
-    // Season/episode filtering â€” applies to ALL series results (including IMDB matches)
     if (normalizedType !== 'movie' && parsed.season !== undefined) {
       const texts = this.collectSearchableTexts(torrent);
 
-      // Allow complete-series packs for any season
       if (this.isCompleteSeriesPack(texts)) {
-        // falls through â€” don't filter by season
+        // falls through
       } else {
-        // Check for season ranges first (e.g. "1Âª a 5Âª Temporada")
         const range = this.extractSeasonRangeFromTexts(texts);
         if (range) {
           if (parsed.season < range.start || parsed.season > range.end) {
             return false;
           }
         } else {
-          // Single season check
           const torrentSeason = this.extractSeasonFromTorrent(torrent);
           if (torrentSeason !== undefined && torrentSeason !== parsed.season) {
             return false;
           }
 
-          // When torrentSeason is undefined, inspect internal files
           if (torrentSeason === undefined) {
             const files = this.extractFilesFromTorrent(torrent);
             if (files.length > 0) {
@@ -2202,11 +2110,9 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
     for (const candidate of candidates) {
       if (!candidate) continue;
-      // Bare IMDB ID
       if (/^tt\d+$/.test(candidate)) {
         return candidate;
       }
-      // IMDB URL or string containing an ID
       const match = candidate.match(/tt\d+/);
       if (match) {
         return match[0];
@@ -2261,11 +2167,9 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       }
     }
 
-    // Fallback: extract year from title/original_title when structured field is empty
     const texts = this.collectSearchableTexts(torrent);
     for (const text of texts) {
       if (!text) continue;
-      // Match (2017) or [2017] or .2017. patterns â€” only years 1950-2099
       const yearMatch = text.match(/[\(\[.\s]((?:19[5-9]\d|20[0-9]\d))[\)\].\s]/)
         ?? text.match(/\b((?:19[5-9]\d|20[0-9]\d))\b/);
       if (yearMatch?.[1]) {
@@ -2301,10 +2205,6 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     return this.toNumber(candidate);
   }
 
-  /**
-   * Collect ALL text fields from a torrent that might contain season/episode/title info.
-   * Used as the basis for all extraction to ensure nothing is missed.
-   */
   private collectSearchableTexts(torrent: TorrentLike): string[] {
     const record = torrent as Record<string, unknown>;
     const texts: string[] = [];
@@ -2327,45 +2227,27 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     return texts;
   }
 
-  // â”€â”€ Season extraction patterns (ordered by specificity) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   private static readonly SEASON_PATTERNS: { regex: RegExp; group: number }[] = [
-    // S01E03, S01, S1
     { regex: /\bS(\d{1,3})(?:E\d{1,3})?\b/i, group: 1 },
-    // 1x03, 01x03, 1Ã—03 (multiplication sign)
     { regex: /\b(\d{1,2})[xÃ—]\d{1,3}\b/i, group: 1 },
-    // Portuguese ordinals: 2Âª Temporada, 3a Temporada, 4Âº Temporada, 1áµƒ Temporada
     { regex: /(\d{1,3})[ÂªÂºáµƒáµ’aAoO]\s*temporada/i, group: 1 },
-    // Temporada 2, Season 3
     { regex: /\b(?:temporada|season)\s*(\d{1,3})\b/i, group: 1 },
-    // Temp 1, Temp. 2, Temp.3
     { regex: /\btemp\.?\s*(\d{1,3})\b/i, group: 1 },
-    // Portuguese ordinals with temp: 2Âª Temp, 3a temp
     { regex: /(\d{1,3})[ÂªÂºáµƒáµ’aAoO]\s*temp\b/i, group: 1 },
-    // T01 or T1 (only when preceded by non-alpha to avoid matching words)
     { regex: /(?:^|[\s._\-\[\(])T(\d{1,2})(?:[\s._\-\]\)]|$)/i, group: 1 },
-    // Pack Temporada 1, Pack Season 1
     { regex: /\bpack\s+(?:temporada|season|temp\.?)\s*(\d{1,3})\b/i, group: 1 },
-    // "da 3 temporada" (informal Portuguese)
     { regex: /\bda\s+(\d{1,3})\s*temporada\b/i, group: 1 },
   ];
 
-  // â”€â”€ Season RANGE patterns (multi-season packs) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   private static readonly SEASON_RANGE_PATTERNS: { regex: RegExp; startGroup: number; endGroup: number }[] = [
-    // 1Âª a 3Âª Temporada, 1a a 6a temporada, 1Âª Ã  5Âª temporada
     { regex: /(\d{1,3})[ÂªÂºáµƒáµ’aAoO]?\s*(?:a|Ã |atÃ©|ao|~|-)\s*(\d{1,3})[ÂªÂºáµƒáµ’aAoO]?\s*temporada/i, startGroup: 1, endGroup: 2 },
-    // Temporadas 1-3, Temporadas 1 a 5, Temporadas 1 ao 6, Temporada 1~5
     { regex: /temporadas?\s*(\d{1,3})\s*(?:a|Ã |atÃ©|ao|~|-|e)\s*(\d{1,3})/i, startGroup: 1, endGroup: 2 },
-    // Season 1-3, Seasons 1 to 5
     { regex: /seasons?\s*(\d{1,3})\s*(?:to|through|thru|~|-)\s*(\d{1,3})/i, startGroup: 1, endGroup: 2 },
-    // S01-S03, S01~S06, S01.S06
     { regex: /\bS(\d{1,3})\s*[-~.]\s*S(\d{1,3})\b/i, startGroup: 1, endGroup: 2 },
-    // T01-T03
     { regex: /\bT(\d{1,2})\s*[-~.]\s*T(\d{1,2})\b/i, startGroup: 1, endGroup: 2 },
-    // Temp 1-3, Temp.1 a 5
     { regex: /\btemp\.?\s*(\d{1,3})\s*(?:a|Ã |atÃ©|ao|~|-)\s*(\d{1,3})/i, startGroup: 1, endGroup: 2 },
   ];
 
-  // â”€â”€ Complete series detection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   private static readonly COMPLETE_SERIES_PATTERNS: RegExp[] = [
     /\b(?:s[eÃ©]rie|series)\s+completa\b/i,
     /\bcomplete\s+(?:s[eÃ©]rie|series)\b/i,
@@ -2379,37 +2261,20 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     /\bdiscografia\s+completa\b/i,
   ];
 
-  // â”€â”€ Episode extraction patterns â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   private static readonly EPISODE_PATTERNS: { regex: RegExp; group: number }[] = [
-    // S01E03, S1E3
     { regex: /\bS\d{1,3}E(\d{1,3})\b/i, group: 1 },
-    // 1x03, 01x03, 1Ã—03 (multiplication sign)
     { regex: /\b\d{1,2}[xÃ—](\d{1,3})\b/i, group: 1 },
-    // EP03, Ep.03, Ep 03, EP.03, ep03
     { regex: /\bep\.?\s*(\d{1,3})\b/i, group: 1 },
-    // E03 standalone (not part of SxxExx â€” that's caught above)
     { regex: /(?<!S\d{0,3})\bE(\d{1,3})\b/i, group: 1 },
-    // EpisÃ³dio 03, Episodio 03, Episode 03
     { regex: /\b(?:epis[oÃ³]dio|episodio|episode)\s*(\d{1,3})\b/i, group: 1 },
-    // CapÃ­tulo 03, Capitulo 03, Cap 03, Cap.03
     { regex: /\b(?:cap[iÃ­]tulo|capitulo|cap)\.?\s*(\d{1,3})\b/i, group: 1 },
-    // Folge 03 (German, sometimes seen in multi-lang releases)
     { regex: /\bfolge\s*(\d{1,3})\b/i, group: 1 },
-    // #03 (hash notation)
     { regex: /#(\d{1,3})\b/, group: 1 },
-    // Bare number at start of filename: "2 - Sick.mp4", "02.Title.mp4", "02 Title.mkv"
-    // Only matches when the number is at the beginning of a path segment (after / \ or start)
     { regex: /(?:^|[\/\\])0*(\d{1,3})\s*[-._\s]+[A-Za-z]/, group: 1 },
-    // Bare number followed by dot-extension: "02.mp4", "2.mkv" (last resort)
     { regex: /(?:^|[\/\\])0*(\d{1,3})\.(mkv|mp4|avi|m4v|ts)$/i, group: 1 },
-    // Three-digit compact: 302 = S03E02 (when context season is known, extract last 2 digits)
     { regex: /(?:^|[\/\\])\d(\d{2})\s*[-._\s]+[A-Za-z]/, group: 1 },
   ];
 
-  /**
-   * Extract season number from torrent using structured fields + comprehensive text parsing.
-   * Searches title, original_title, filename, and other text fields.
-   */
   private extractSeasonFromTorrent(torrent: TorrentLike): number | undefined {
     const structured = this.extractSeason(torrent);
     if (structured !== undefined) return structured;
@@ -2428,10 +2293,6 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     return undefined;
   }
 
-  /**
-   * Detect multi-season packs like "1Âª a 5Âª Temporada", "Temporadas 1-6".
-   * Returns { start, end } or undefined.
-   */
   private extractSeasonRangeFromTexts(texts: string[]): { start: number; end: number } | undefined {
     for (const text of texts) {
       if (!text) continue;
@@ -2449,9 +2310,6 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     return undefined;
   }
 
-  /**
-   * Detect complete-series packs ("SÃ©rie Completa", "Todas as Temporadas", etc.).
-   */
   private isCompleteSeriesPack(texts: string[]): boolean {
     for (const text of texts) {
       if (!text) continue;
@@ -2462,9 +2320,6 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     return false;
   }
 
-  /**
-   * Extract episode number from torrent using structured fields + comprehensive text parsing.
-   */
   private extractEpisodeFromTorrent(torrent: TorrentLike): number | undefined {
     const structured = this.extractEpisode(torrent);
     if (structured !== undefined) return structured;
@@ -2530,12 +2385,10 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
     candidates.forEach(addValue);
 
-    // Auto-detect episode ranges from title like "E01-E10", "EP01-EP10", "Episodio 1 ao 10"
     if (numbers.size === 0) {
       const texts = this.collectSearchableTexts(torrent);
       for (const text of texts) {
         if (!text) continue;
-        // E01-E10, EP01-EP10, E01~E10
         const rangeMatch = text.match(/\bE(?:P)?\.?\s*(\d{1,3})\s*[-~]\s*E(?:P)?\.?\s*(\d{1,3})\b/i);
         if (rangeMatch?.[1] && rangeMatch?.[2]) {
           const start = parseInt(rangeMatch[1], 10);
@@ -2545,7 +2398,6 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
             break;
           }
         }
-        // "Episodio 1 ao 10", "EpisÃ³dio 1 a 10"
         const ptRangeMatch = text.match(/\b(?:epis[oÃ³]dio|episodio|cap[iÃ­]tulo|capitulo)\s*(\d{1,3})\s*(?:a|ao|atÃ©|~|-)\s*(\d{1,3})\b/i);
         if (ptRangeMatch?.[1] && ptRangeMatch?.[2]) {
           const start = parseInt(ptRangeMatch[1], 10);
@@ -2701,7 +2553,6 @@ private mapTorrentToStream(
     return undefined;
   }
 
-  // Reject torrents where the total size is suspiciously small (likely fake/ad)
   const totalSize = this.extractSize(torrent);
   if (typeof totalSize === 'number' && totalSize > 0 && totalSize < TorrentIndexerProvider.MIN_VIDEO_SIZE) {
     return undefined;
@@ -2719,8 +2570,6 @@ private mapTorrentToStream(
   const selectedFileName = selectedFile?.path;
   const fileIdx = selectedFile?.originalIndex;
 
-  // Use the selected video file's basename as the display title when available.
-  // This avoids showing slug/site junk from the indexer.
   let displayTitle: string;
   if (selectedFileName) {
     const basename = selectedFileName.replace(/^.*[\\/]/, '');
@@ -2729,7 +2578,6 @@ private mapTorrentToStream(
     displayTitle = this.cleanIndexerTitle(this.buildDisplayTitle(torrent, rawTitle));
   }
 
-  // Parse size â€” the indexer may return a string like "4.06 GB"
   const rawSize = selectedFile?.size ?? this.extractSize(torrent);
   const size = typeof rawSize === 'number' ? rawSize : this.parseSizeString(rawSize);
 
