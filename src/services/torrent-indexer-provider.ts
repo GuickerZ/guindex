@@ -3220,6 +3220,10 @@ private mapTorrentToStream(
     'lapumia.org': 'LAPUMiA',
     'ondebaixa.com': 'OndeBaixa',
     'torrentdosfilmes.se': 'TorrentDosFilmes',
+    'torrentdosfilmes.net': 'TorrentDosFilmes',
+    'torrentdosfilmes.com': 'TorrentDosFilmes',
+    'torrentdosfilmes.tv': 'TorrentDosFilmes',
+    'torrentdosfilmes.site': 'TorrentDosFilmes',
     'thepiratefilmes.com': 'ThePirateFilmes',
     'starckfilmes.com': 'StarckFilmes',
     'torrentmovies.co': 'TorrentMovies',
@@ -3252,9 +3256,18 @@ private mapTorrentToStream(
       if (hostname) {
         // Normalize known site hostnames with versioned subdomains
         const baseHost = hostname.replace(/^(www\.)?/, '').replace(/-v\d+/, '').replace(/\d+\./, '.');
-        return TorrentIndexerProvider.SITE_LABEL_MAP[hostname]
-          ?? TorrentIndexerProvider.SITE_LABEL_MAP[baseHost]
-          ?? hostname;
+        const mapped = TorrentIndexerProvider.SITE_LABEL_MAP[hostname]
+          ?? TorrentIndexerProvider.SITE_LABEL_MAP[baseHost];
+          
+        if (mapped) return mapped;
+        
+        const domainParts = baseHost.split('.');
+        const mainPart = domainParts[0];
+        if (mainPart && mainPart.length > 2) {
+          return mainPart.charAt(0).toUpperCase() + mainPart.slice(1);
+        }
+        
+        return hostname;
       }
     }
 
