@@ -12,7 +12,7 @@ export class ConfigController {
   createAddonManifest(isConfigured: boolean = false): AddonManifest {
     return {
       id: 'org.guindex.addon',
-      version: '2.0.0',
+      version: '2.1.9',
       name: 'GuIndex',
       description:
         'Addon brasileiro para Stremio. Busca torrents nacionais via torrent-indexer e resolve via Real-Debrid ou TorBox.',
@@ -427,7 +427,7 @@ export class ConfigController {
         <img class="logo-mark" src="/logo.png" alt="GuIndex logo">
       </div>
       <div class="logo">Gu<span>Index</span></div>
-      <div class="badge">v2.0.0 &bull; Open Source</div>
+      <div class="badge">v2.1.9 &bull; Open Source</div>
       <div class="subtitle">
         Addon Stremio para torrents brasileiros<br>
         via Real-Debrid ou TorBox

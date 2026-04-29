@@ -460,6 +460,8 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
   private static cinemetaCache = new Map<string, { data: CinemetaMeta; ts: number }>();
   private static readonly CINEMETA_TTL = 5 * 60 * 1000; // 5 min
   private static searchCache = new Map<string, SearchCacheEntry>();
+  private static slowPathCache = new Map<string, number>();
+  private static readonly SLOW_PATH_TTL_MS = 15 * 60 * 1000; // 15 min
   private static localizedTitleCache = new Map<string, LocalizedTitleCacheEntry>();
   private static indexerNamesCache:
     | { ts: number; names: string[] }
@@ -929,6 +931,12 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
   }
 
   private warmIndexerCacheInBackground(query: string, existingResults: TorrentLike[], context?: MatchContext): void {
+    const lastScraped = TorrentIndexerProvider.slowPathCache.get(query) || 0;
+    if (Date.now() - lastScraped < TorrentIndexerProvider.SLOW_PATH_TTL_MS) {
+      return;
+    }
+    
+    TorrentIndexerProvider.slowPathCache.set(query, Date.now());
     globalQueue.add(async () => {
       await this.fetchSearchResultsFromIndexers(query, undefined, context);
     }, `Atualização de Fundo para '${query}'`, context);
@@ -942,6 +950,12 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     for (const query of queries) {
       if (!query) continue;
       
+      const lastScraped = TorrentIndexerProvider.slowPathCache.get(query) || 0;
+      if (Date.now() - lastScraped < TorrentIndexerProvider.SLOW_PATH_TTL_MS) {
+        continue;
+      }
+      
+      TorrentIndexerProvider.slowPathCache.set(query, Date.now());
       globalQueue.add(async () => {
         const cacheKey = this.getSearchCacheKey(query);
         const cached = TorrentIndexerProvider.searchCache.get(cacheKey);
@@ -991,6 +1005,8 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     if (!TorrentIndexerProvider.ENABLE_FALLBACK_INDEXER_SEARCH) {
       return [];
     }
+    
+    TorrentIndexerProvider.slowPathCache.set(query, Date.now());
 
     const indexers = await this.fetchIndexerNames();
     if (indexers.length === 0) {
@@ -3474,6 +3490,11 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     if (typeof value !== 'string') return undefined;
     const trimmed = value.trim();
     if (!trimmed) return undefined;
+
+    const numOnly = parseFloat(trimmed);
+    if (!isNaN(numOnly) && !/[a-zA-Z]/.test(trimmed)) {
+      return Math.round(numOnly);
+    }
 
     const match = trimmed.match(/([\d.]+)\s*(TB|GB|MB|KB|B)/i);
     if (!match || !match[1] || !match[2]) return undefined;
