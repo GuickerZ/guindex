@@ -291,52 +291,42 @@ const LANGUAGE_ALIASES: Record<string, string> = {
   english: 'English',
   ingles: 'English',
   eng: 'English',
-  en: 'English',
   spanish: 'Spanish',
   espanhol: 'Spanish',
   espanol: 'Spanish',
   spa: 'Spanish',
-  es: 'Spanish',
   castellano: 'Spanish',
   latino: 'Spanish',
   french: 'French',
   frances: 'French',
   fre: 'French',
   fra: 'French',
-  fr: 'French',
   italian: 'Italian',
   italiano: 'Italian',
   ita: 'Italian',
-  it: 'Italian',
   german: 'German',
   alemao: 'German',
   ger: 'German',
   deu: 'German',
-  de: 'German',
   japanese: 'Japanese',
   japones: 'Japanese',
   jpn: 'Japanese',
-  ja: 'Japanese',
   korean: 'Korean',
   coreano: 'Korean',
   kor: 'Korean',
-  ko: 'Korean',
   chinese: 'Chinese',
   chines: 'Chinese',
   mandarim: 'Chinese',
   mandarin: 'Chinese',
   chi: 'Chinese',
   zho: 'Chinese',
-  zh: 'Chinese',
   cantonese: 'Cantonese',
   cantones: 'Cantonese',
   russian: 'Russian',
   russo: 'Russian',
   rus: 'Russian',
-  ru: 'Russian',
   hindi: 'Hindi',
   hin: 'Hindi',
-  hi: 'Hindi',
   arabic: 'Arabic',
   arabe: 'Arabic',
   turkish: 'Turkish',
@@ -461,7 +451,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
   private static readonly CINEMETA_TTL = 5 * 60 * 1000; // 5 min
   private static searchCache = new Map<string, SearchCacheEntry>();
   private static slowPathCache = new Map<string, number>();
-  private static readonly SLOW_PATH_TTL_MS = 15 * 60 * 1000; // 15 min
+  private static readonly SLOW_PATH_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
   private static localizedTitleCache = new Map<string, LocalizedTitleCacheEntry>();
   private static indexerNamesCache:
     | { ts: number; names: string[] }
@@ -2642,8 +2632,23 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       displayTitle = this.cleanIndexerTitle(this.buildDisplayTitle(torrent, rawTitle));
     }
 
+    const rawQuality =
+      (torrent as Record<string, unknown>).quality ||
+      (torrent as Record<string, unknown>).resolution ||
+      this.inferQualityFromTitle(displayTitle) ||
+      this.inferQualityFromTitle(rawTitle);
+    const quality = this.normalizeQuality(rawQuality);
+
     const rawSize = selectedFile?.size ?? this.extractSize(torrent);
-    const size = typeof rawSize === 'number' ? rawSize : this.parseSizeString(rawSize);
+    let size = typeof rawSize === 'number' ? rawSize : this.parseSizeString(rawSize);
+
+    // Fallback para evitar que o AIOStreams filtre resultados sem tamanho (ex: Vaca Torrent)
+    if (size === undefined || size <= 0) {
+      if (quality === '4K') size = 15 * 1024 * 1024 * 1024; // 15GB
+      else if (quality === '1080p') size = 3 * 1024 * 1024 * 1024; // 3GB
+      else if (quality === '720p') size = 1024 * 1024 * 1024; // 1GB
+      else size = 800 * 1024 * 1024; // 800MB
+    }
 
     const releaseYear = this.extractYear(torrent);
 
@@ -2655,13 +2660,6 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       infoSegments.push(`Size: ${this.formatSize(size)}`);
     }
     infoSegments.push(`[${sourceLabel}]`);
-
-    const rawQuality =
-      (torrent as Record<string, unknown>).quality ||
-      (torrent as Record<string, unknown>).resolution ||
-      this.inferQualityFromTitle(displayTitle) ||
-      this.inferQualityFromTitle(rawTitle);
-    const quality = this.normalizeQuality(rawQuality);
     const releaseGroup =
       (torrent as Record<string, unknown>).releaseGroup ||
       (torrent as Record<string, unknown>).group ||
