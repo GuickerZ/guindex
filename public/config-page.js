@@ -171,7 +171,11 @@
       return;
     }
 
-    window.location.href = 'stremio://' + url.replace(/^https?:\/\//i, '');
+    // Converte manifest.json?a=1&b=2 para /a=1|b=2/manifest.json para o protocolo stremio://
+    // Isso evita que navegadores ou o Windows cortem a query string no redirecionamento.
+    var pathUrl = url.replace('/manifest.json?', '/').replace(/&/g, '|') + '/manifest.json';
+    window.location.href = 'stremio://' + pathUrl.replace(/^https?:\/\//i, '');
+    
     setTimeout(function () {
       showToast('Se o app nao abriu, use "Copiar URL de instalacao" no modal.');
     }, 1200);
