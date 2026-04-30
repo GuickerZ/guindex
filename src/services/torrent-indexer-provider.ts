@@ -1906,7 +1906,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       }
       if (releaseYear !== undefined) {
         const torrentYear = this.extractYear(torrent);
-        if (torrentYear !== undefined && Math.abs(torrentYear - releaseYear) > 1) {
+        if (torrentYear !== undefined && Math.abs(torrentYear - releaseYear) > 3) {
           return false;
         }
       }
