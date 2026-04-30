@@ -49,3 +49,4 @@ test-artifacts*
 
 .vercel
 package-lock.json
+.kiro

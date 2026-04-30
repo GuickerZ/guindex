@@ -491,39 +491,37 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
   );
   private static readonly TMDB_API_KEY = readEnv('TMDB_API_KEY');
 
-  private static globalQueue: Array<() => Promise<void>> = [];
-  private static globalQueueRunning = 0;
-  private static readonly GLOBAL_QUEUE_CONCURRENCY = parsePositiveInt(
-    process.env.TORRENT_INDEXER_GLOBAL_QUEUE_CONCURRENCY,
-    1,
+  // Additional static properties for indexer management
+  private static readonly ENABLE_FALLBACK_INDEXER_SEARCH = parseBoolean(
+    process.env.TORRENT_INDEXER_ENABLE_FALLBACK_INDEXER_SEARCH,
+    true,
   );
-  private static readonly GLOBAL_QUEUE_DELAY_MS = parsePositiveInt(
-    process.env.TORRENT_INDEXER_GLOBAL_QUEUE_DELAY_MS,
-    1500,
+  private static readonly FALLBACK_REQUEST_TIMEOUT_MS = parsePositiveInt(
+    process.env.TORRENT_INDEXER_FALLBACK_REQUEST_TIMEOUT_MS,
+    20000,
   );
-
-  private enqueueBackgroundWarming(task: () => Promise<void>) {
-    TorrentIndexerProvider.globalQueue.push(task);
-    this.processGlobalQueue();
-  }
-
-  private async processGlobalQueue() {
-    if (TorrentIndexerProvider.globalQueueRunning >= TorrentIndexerProvider.GLOBAL_QUEUE_CONCURRENCY) {
-      return;
-    }
-    const task = TorrentIndexerProvider.globalQueue.shift();
-    if (!task) return;
-
-    TorrentIndexerProvider.globalQueueRunning++;
-    try {
-      await task();
-    } catch (e) {
-      // Ignora erro do background task
-    } finally {
-      TorrentIndexerProvider.globalQueueRunning--;
-      setTimeout(() => this.processGlobalQueue(), TorrentIndexerProvider.GLOBAL_QUEUE_DELAY_MS);
-    }
-  }
+  private static readonly HYBRID_MIN_RESULTS = parsePositiveInt(
+    process.env.TORRENT_INDEXER_HYBRID_MIN_RESULTS,
+    3,
+  );
+  private static readonly HYBRID_MIN_INDEXERS = parsePositiveInt(
+    process.env.TORRENT_INDEXER_HYBRID_MIN_INDEXERS,
+    2,
+  );
+  private static readonly INDEXER_FAILURE_THRESHOLD = parsePositiveInt(
+    process.env.TORRENT_INDEXER_FAILURE_THRESHOLD,
+    3,
+  );
+  private static readonly INDEXER_FAILURE_COOLDOWN_MS = parsePositiveInt(
+    process.env.TORRENT_INDEXER_FAILURE_COOLDOWN_MS,
+    300000, // 5 minutes
+  );
+  private static readonly DISABLED_INDEXERS = parseCsvSet(
+    process.env.TORRENT_INDEXER_DISABLED_INDEXERS,
+    [],
+  );
+  private static indexerPerformance = new Map<string, IndexerPerformanceEntry>();
+  private static indexerFailureState = new Map<string, IndexerFailureState>();
 
   constructor(name: string, baseUrl: string) {
     super(name);
@@ -669,23 +667,43 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
       // 3. BACKGROUND FULL UPDATE (quando Fast-path atende)
       logReq(context, `📡 Enfileirando job em background (Slow-path completo) para atualização profunda do cache...`);
-      this.enqueueBackgroundWarming(async () => {
+      globalQueue.add(async () => {
         try {
           // Passamos limitQueries: 10 e timeoutMs: 40000 para forçar uma busca pesada em tudo no background
           await this.fetchMultiSearchResults(uniqueQueries, false, context, { timeoutMs: 40000, limitQueries: 10 });
         } catch (err) {
           logReq(context, `⚠️ Erro no background cache warming: ${err instanceof Error ? err.message : String(err)}`);
         }
-      });
+      }, 'Background Full Update (Fast-path)', context);
 
       return streams;
     }
 
     // 2. MID-PATH (Espera até 9.5s para retornar ao AIOStreams)
-    logReq(context, `⚠️ Fase 1 (Fast-path) insuficiente (${streams.length} streams). Iniciando Fase 2 (Mid-path 10s)...`);
+    
+    // Bug Fix 4: Limit mid-path to exactly 3 queries WITHOUT years
+    // Montamos as queries diretamente ao invés de usar uniqueQueries (que tem queries com anos)
+    const midPathQueries: string[] = [];
+    
+    // 1. IMDb ID (se disponível)
+    if (imdbQuery) {
+      midPathQueries.push(imdbQuery);
+    }
+    
+    // 2. Título em inglês (sem ano)
+    if (targetTitle) {
+      midPathQueries.push(targetTitle);
+    }
+    
+    // 3. Título em PT-BR (primeiro título localizado, sem ano)
+    if (displayTitles.length > 1 && displayTitles[1] && displayTitles[1] !== targetTitle) {
+      midPathQueries.push(displayTitles[1]);
+    }
+    
+    logReq(context, `⚠️ Fase 1 (Fast-path) insuficiente (${streams.length} streams). Iniciando Fase 2 (Mid-path 10s) com queries: [${midPathQueries.join(', ')}]...`);
 
-    // Usamos um timeout seguro de 9.5s, mandamos TODAS as queries, e calculamos os indexadores dinamicamente para caber na margem (8500ms)
-    const midRawTorrents = await this.fetchMultiSearchResults(uniqueQueries, false, context, { timeoutMs: 9500, dynamicIndexerLimitMs: 8500 });
+    // Bug Fix 1: Removido dynamicIndexerLimitMs, agora busca TODOS os indexadores EXCETO BluDV
+    const midRawTorrents = await this.fetchMultiSearchResults(midPathQueries, false, context, { timeoutMs: 9500, maxIndexers: 999 });
     const midTorrents = this.rankTorrentsByQuery(midRawTorrents, targetTitle ?? uniqueQueries[0] ?? id);
 
     seen.clear();
@@ -716,13 +734,13 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
     // 3. BACKGROUND FULL UPDATE (quando Mid-path é acionado)
     logReq(context, `📡 Enfileirando job em background (Slow-path completo) pós Mid-path para garantir todas as sources no cache...`);
-    this.enqueueBackgroundWarming(async () => {
+    globalQueue.add(async () => {
       try {
         await this.fetchMultiSearchResults(uniqueQueries, false, context, { timeoutMs: 40000, limitQueries: 10 });
       } catch (err) {
         logReq(context, `⚠️ Erro no background cache warming pós Mid-path: ${err instanceof Error ? err.message : String(err)}`);
       }
-    });
+    }, 'Background Full Update (Mid-path)', context);
 
     return streams;
   }
@@ -905,13 +923,13 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
         signal: AbortSignal.timeout(6_000),
       });
       if (response.statusCode >= 400) {
-        logReq({}, `❌ Erro no /search HTTP ${response.statusCode}: ${await response.body.text()}`);
+        logReq(undefined, `❌ Erro no /search HTTP ${response.statusCode}: ${await response.body.text()}`);
         return [];
       }
       const payload = await response.body.json();
       return this.normalizeTorrentPayload(payload);
     } catch (err) {
-      logReq({}, `❌ Erro na conexão com /search: ${err instanceof Error ? err.message : String(err)}`);
+      logReq(undefined, `❌ Erro na conexão com /search: ${err instanceof Error ? err.message : String(err)}`);
       return [];
     }
   }
@@ -943,77 +961,51 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
     const timeout = options?.timeoutMs ?? 20000;
 
-    // Se maxIndexers for definido OU dynamicIndexerLimitMs for definido, disparamos requests paralelos
-    if ((options?.maxIndexers && options.maxIndexers > 0) || (options?.dynamicIndexerLimitMs && options.dynamicIndexerLimitMs > 0)) {
+    // Se maxIndexers for definido, disparamos requests paralelos (mid-path)
+    // Bug Fix 1: Removido dynamicIndexerLimitMs - agora busca TODOS os indexadores EXCETO BluDV
+    if (options?.maxIndexers && options.maxIndexers > 0) {
       const indexerNames = await this.fetchIndexerNames();
-      let targetIndexers: string[] = [];
-
-      if (options.dynamicIndexerLimitMs) {
-        // Calcula dinamicamente quantos indexers cabem dentro da margem de tempo
-        let accumulatedMs = 0;
-        const marginMs = options.dynamicIndexerLimitMs;
-
-        for (const name of indexerNames) {
-          const stats = TorrentIndexerProvider.indexerPerformance.get(this.normalizeIndexerSlug(name));
-          // Estima o peso no backend. Se não tiver stats, assume 2500ms como penalidade padrão.
-          const estimatedMs = stats && stats.avgMs > 0 ? stats.avgMs : 2500;
-          
-          if (accumulatedMs + estimatedMs <= marginMs) {
-            targetIndexers.push(name);
-            accumulatedMs += estimatedMs;
-          } else {
-            // Atingimos o teto de processamento paralelo que o backend suportaria bem
-            break;
-          }
+      
+      // Bug Fix 1: Excluir BluDV do mid-path (é extremamente lento)
+      const midPathIndexers = indexerNames.filter(name => !name.toLowerCase().includes('bludv'));
+      
+      logReq(context, `🐢 Mid-path iniciado: Buscando [${queries.join(', ')}] em TODOS os indexadores EXCETO BluDV: [${midPathIndexers.join(', ')}] (Timeout: ${timeout}ms)`);
+      
+      const promises = midPathIndexers.map(async (indexer) => {
+        const startedAt = Date.now();
+        const normalizedIndexer = this.normalizeIndexerSlug(indexer);
+        
+        const url = new URL(`${this.baseUrl}/indexers/${indexer}`);
+        for (const q of queries) {
+          url.searchParams.append('q', q);
         }
         
-        // Garante pelo menos 1 indexador caso a margem seja muito baixa
-        if (targetIndexers.length === 0 && indexerNames.length > 0) {
-          targetIndexers.push(indexerNames[0] as string);
-        }
-      } else if (options.maxIndexers) {
-        targetIndexers = indexerNames.slice(0, options.maxIndexers);
-      }
-
-      if (targetIndexers.length > 0) {
-        logReq(context, `🐢 Mid-path iniciado: Buscando [${queries.join(', ')}] nos top indexadores [${targetIndexers.join(', ')}] (Timeout: ${timeout}ms)`);
-        
-        const promises = targetIndexers.map(async (indexer) => {
-          const startedAt = Date.now();
-          const normalizedIndexer = this.normalizeIndexerSlug(indexer);
-          
-          const url = new URL(`${this.baseUrl}/indexers/${indexer}`);
-          for (const q of queries) {
-            url.searchParams.append('q', q);
-          }
-          
-          try {
-            const response = await request(url.toString(), {
-              signal: AbortSignal.timeout(timeout),
-              headers: { Accept: 'application/json' },
-            });
-            if (response.statusCode >= 400) {
-              this.recordIndexerFailure(normalizedIndexer);
-              this.recordIndexerPerformance(normalizedIndexer, Date.now() - startedAt, 0);
-              return [];
-            }
-            const payload = await response.body.json();
-            const results = this.normalizeTorrentPayload(payload);
-            
-            this.clearIndexerFailure(normalizedIndexer);
-            this.recordIndexerPerformance(normalizedIndexer, Date.now() - startedAt, results.length);
-            return results;
-          } catch (err) {
+        try {
+          const response = await request(url.toString(), {
+            signal: AbortSignal.timeout(timeout),
+            headers: { Accept: 'application/json' },
+          });
+          if (response.statusCode >= 400) {
             this.recordIndexerFailure(normalizedIndexer);
             this.recordIndexerPerformance(normalizedIndexer, Date.now() - startedAt, 0);
-            logReq(context, `❌ Erro no indexer ${indexer}: ${err instanceof Error ? err.message : String(err)}`);
             return [];
           }
-        });
+          const payload = await response.body.json();
+          const results = this.normalizeTorrentPayload(payload);
+          
+          this.clearIndexerFailure(normalizedIndexer);
+          this.recordIndexerPerformance(normalizedIndexer, Date.now() - startedAt, results.length);
+          return results;
+        } catch (err) {
+          this.recordIndexerFailure(normalizedIndexer);
+          this.recordIndexerPerformance(normalizedIndexer, Date.now() - startedAt, 0);
+          logReq(context, `❌ Erro no indexer ${indexer}: ${err instanceof Error ? err.message : String(err)}`);
+          return [];
+        }
+      });
 
-        const resultsArray = await Promise.all(promises);
-        return resultsArray.flat();
-      }
+      const resultsArray = await Promise.all(promises);
+      return resultsArray.flat();
     }
 
     const limit = options?.limitQueries ?? 3;
