@@ -131,6 +131,7 @@ interface IndexerPerformanceEntry {
 interface FallbackSearchOptions {
   excludeIndexers?: Set<string>;
   maxIndexers?: number;
+  dynamicIndexerLimitMs?: number;
   perIndexerLimit?: number;
   targetResults?: number;
   timeoutMs?: number;
@@ -673,8 +674,8 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     // 2. MID-PATH (Espera até 9.5s para retornar ao AIOStreams)
     logReq(context, `⚠️ Fase 1 (Fast-path) insuficiente (${streams.length} streams). Iniciando Fase 2 (Mid-path 10s)...`);
 
-    // Usamos um timeout seguro de 9.5s, mandamos TODAS as queries (sem limite), mas limitamos aos 3 indexadores mais rápidos
-    const midRawTorrents = await this.fetchMultiSearchResults(uniqueQueries, false, context, { timeoutMs: 9500, maxIndexers: 3 });
+    // Usamos um timeout seguro de 9.5s, mandamos TODAS as queries, e calculamos os indexadores dinamicamente para caber na margem (8500ms)
+    const midRawTorrents = await this.fetchMultiSearchResults(uniqueQueries, false, context, { timeoutMs: 9500, dynamicIndexerLimitMs: 8500 });
     const midTorrents = this.rankTorrentsByQuery(midRawTorrents, targetTitle ?? uniqueQueries[0] ?? id);
 
     seen.clear();
@@ -932,11 +933,37 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
     const timeout = options?.timeoutMs ?? 20000;
 
-    // Se maxIndexers for definido, disparamos requests paralelos apenas para os melhores indexadores
-    // mas com TODAS as queries! Isso é ideal para o Mid-path.
-    if (options?.maxIndexers && options.maxIndexers > 0) {
+    // Se maxIndexers for definido OU dynamicIndexerLimitMs for definido, disparamos requests paralelos
+    if ((options?.maxIndexers && options.maxIndexers > 0) || (options?.dynamicIndexerLimitMs && options.dynamicIndexerLimitMs > 0)) {
       const indexerNames = await this.fetchIndexerNames();
-      const targetIndexers = indexerNames.slice(0, options.maxIndexers);
+      let targetIndexers: string[] = [];
+
+      if (options.dynamicIndexerLimitMs) {
+        // Calcula dinamicamente quantos indexers cabem dentro da margem de tempo
+        let accumulatedMs = 0;
+        const marginMs = options.dynamicIndexerLimitMs;
+
+        for (const name of indexerNames) {
+          const stats = TorrentIndexerProvider.indexerPerformance.get(this.normalizeIndexerSlug(name));
+          // Estima o peso no backend. Se não tiver stats, assume 2500ms como penalidade padrão.
+          const estimatedMs = stats && stats.avgMs > 0 ? stats.avgMs : 2500;
+          
+          if (accumulatedMs + estimatedMs <= marginMs) {
+            targetIndexers.push(name);
+            accumulatedMs += estimatedMs;
+          } else {
+            // Atingimos o teto de processamento paralelo que o backend suportaria bem
+            break;
+          }
+        }
+        
+        // Garante pelo menos 1 indexador caso a margem seja muito baixa
+        if (targetIndexers.length === 0 && indexerNames.length > 0) {
+          targetIndexers.push(indexerNames[0] as string);
+        }
+      } else if (options.maxIndexers) {
+        targetIndexers = indexerNames.slice(0, options.maxIndexers);
+      }
 
       if (targetIndexers.length > 0) {
         logReq(context, `🐢 Mid-path iniciado: Buscando [${queries.join(', ')}] nos top indexadores [${targetIndexers.join(', ')}] (Timeout: ${timeout}ms)`);
