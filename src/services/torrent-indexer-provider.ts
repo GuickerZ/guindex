@@ -620,6 +620,13 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     if (streams.length >= TARGET_STREAMS_PER_REQUEST && sourceCounts.size >= 2) {
       logReq(context, `✅ Fase 1 (Fast-path) encontrou ${streams.length} streams finais para '${id}'.`);
       await this.decorateWithDebrid(streams, options);
+
+      // Background warming: dispara a busca nos indexadores em background para manter o cache (Meilisearch) quente
+      logReq(context, `📡 Disparando job em background (Slow-path) para atualização do cache...`);
+      this.fetchMultiSearchResults(uniqueQueries, false, context).catch(err => {
+        logReq(context, `⚠️ Erro no background cache warming: ${err instanceof Error ? err.message : String(err)}`);
+      });
+
       return streams;
     }
 
