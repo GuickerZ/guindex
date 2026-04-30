@@ -41,39 +41,52 @@ async function populateIndex() {
         const results = data.results || [];
         
         for (const item of results) {
-          const title = item.title || item.name;
-          const originalTitle = item.original_title || item.original_name;
+          const titlePTBR = item.title || item.name || '';
+          const originalTitle = item.original_title || item.original_name || '';
           const yearMatch = (item.release_date || item.first_air_date || '').match(/^(\d{4})/);
           const year = yearMatch ? yearMatch[1] : '';
 
-          // Fetch external IDs
+          // Fetch external IDs e título em Inglês
           let imdbId = '';
+          let titleEN = '';
           try {
-            const extUrl = `https://api.themoviedb.org/3/${type}/${item.id}?api_key=${TMDB_API_KEY}&append_to_response=external_ids`;
+            const extUrl = `https://api.themoviedb.org/3/${type}/${item.id}?api_key=${TMDB_API_KEY}&append_to_response=external_ids&language=en-US`;
             const extRes = await fetch(extUrl);
             if (extRes.ok) {
               const extData = await extRes.json();
               imdbId = extData?.external_ids?.imdb_id || extData?.imdb_id || '';
+              titleEN = extData?.title || extData?.name || '';
             }
           } catch (e) {
-            // Ignora erros ao tentar buscar ID externo
+            // Ignora erros ao tentar buscar detalhes
           }
 
-          // Monta queries baseadas no título e ano para o indexador
-          const queriesList = [title, originalTitle];
-          if (year) {
-            if (title) queriesList.push(`${title} ${year}`);
-            if (originalTitle) queriesList.push(`${originalTitle} ${year}`);
+          // Monta queries baseadas nos três títulos (PT-BR, EN, Original) e ano
+          const queriesList: string[] = [];
+          
+          if (imdbId) queriesList.push(imdbId);
+
+          const safeAddQuery = (t: string) => {
+            if (t && t.trim().length > 0) {
+              queriesList.push(t.trim());
+              if (year) queriesList.push(`${t.trim()} ${year}`);
+            }
+          };
+
+          safeAddQuery(titlePTBR);
+          safeAddQuery(titleEN);
+
+          // Só adiciona o original se for diferente do EN e PT-BR (ex: animes/filmes de outros países)
+          if (originalTitle && originalTitle !== titleEN && originalTitle !== titlePTBR) {
+            safeAddQuery(originalTitle);
           }
-          if (imdbId) {
-            queriesList.push(imdbId);
-          }
+
           const queries = Array.from(new Set<string>(queriesList)).filter(q => q && q.length > 0);
 
           if (queries.length === 0) continue;
 
           totalQueries++;
-          console.log(`[Populate] 📡 Disparando busca para '${title}'${imdbId ? ` (${imdbId})` : ''}: [${queries.join(', ')}]`);
+          console.log(`[Populate] 📡 Disparando busca para '${titlePTBR}'${imdbId ? ` (${imdbId})` : ''}: [${queries.join(', ')}]`);
           
           try {
             const searchUrl = new URL(`${INDEXER_URL}/indexers/all`);
