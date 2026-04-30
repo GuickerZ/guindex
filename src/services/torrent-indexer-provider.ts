@@ -844,7 +844,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
   }
 
 
-  private async fetchMultiSearchResults(queries: string[], fastPathOnly = false, context: MatchContext): Promise<TorrentLike[]> {
+  private async fetchMultiSearchResults(queries: string[], fastPathOnly = false, context: MatchContext, options?: FallbackSearchOptions): Promise<TorrentLike[]> {
     if (!queries || queries.length === 0) return [];
 
     const cacheKey = this.getSearchCacheKey(queries.join('|'));
