@@ -868,22 +868,26 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     if (uniqueQueries.length === 0) return [];
 
     const url = new URL(`${this.baseUrl}/search`);
+    for (const q of uniqueQueries) {
+      url.searchParams.append('q', q);
+    }
+
     try {
       const response = await request(url.toString(), {
-        method: 'POST',
+        method: 'GET',
         headers: {
-          'Content-Type': 'application/json',
           'Accept': 'application/json'
         },
-        body: JSON.stringify({
-          queries: uniqueQueries
-        }),
         signal: AbortSignal.timeout(6_000),
       });
-      if (response.statusCode >= 400) return [];
+      if (response.statusCode >= 400) {
+        logReq({}, `❌ Erro no /search HTTP ${response.statusCode}: ${await response.body.text()}`);
+        return [];
+      }
       const payload = await response.body.json();
       return this.normalizeTorrentPayload(payload);
-    } catch {
+    } catch (err) {
+      logReq({}, `❌ Erro na conexão com /search: ${err instanceof Error ? err.message : String(err)}`);
       return [];
     }
   }
@@ -896,7 +900,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     if (relevantResults.length < 2) return false;
 
     const uniqueIndexers = this.collectIndexerSlugs(relevantResults);
-    const isSufficient = uniqueIndexers.size >= 2;
+    const isSufficient = uniqueIndexers.size >= 1;
     if (isSufficient) {
       logReq(context, `⚡ Fast-path aprovou '${query}': ${relevantResults.length} resultados válidos em ${uniqueIndexers.size} indexadores.`);
     }
@@ -912,22 +916,29 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
   ): Promise<TorrentLike[]> {
     if (!queries || queries.length === 0) return [];
 
-    logReq(context, `🐢 Slow-path iniciado: Buscando [${queries.join(', ')}] via /indexers/all`);
+    // Limita para as 3 queries mais importantes para não sobrecarregar os indexadores e causar timeout
+    const topQueries = queries.slice(0, 3);
+
+    logReq(context, `🐢 Slow-path iniciado: Buscando [${topQueries.join(', ')}] via /indexers/all`);
 
     const url = new URL(`${this.baseUrl}/indexers/all`);
-    for (const q of queries) {
+    for (const q of topQueries) {
       url.searchParams.append('q', q);
     }
 
     try {
       const response = await request(url.toString(), {
-        signal: AbortSignal.timeout(15_000), // timeout maior já que busca em todos
+        signal: AbortSignal.timeout(20_000), // timeout ampliado para 20s
         headers: { Accept: 'application/json' },
       });
-      if (response.statusCode >= 400) return [];
+      if (response.statusCode >= 400) {
+        logReq(context, `❌ Erro no /indexers/all HTTP ${response.statusCode}: ${await response.body.text()}`);
+        return [];
+      }
       const payload = await response.body.json();
       return this.normalizeTorrentPayload(payload);
-    } catch {
+    } catch (err) {
+      logReq(context, `❌ Erro na conexão com /indexers/all: ${err instanceof Error ? err.message : String(err)}`);
       return [];
     }
   }
