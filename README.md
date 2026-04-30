@@ -413,7 +413,7 @@ TMDB_API_KEY=SUA_CHAVE_TMDB
 Acesse a pagina de configuracao da sua instancia e siga as instrucoes. A URL do manifest segue o formato:
 
 ```
-https://seu-dominio.com/manifest.json?debridProvider=torbox&torboxToken=SEU_TOKEN
+https://seu-dominio.com/torbox/SEU_TOKEN/manifest.json
 ```
 
 ### Uso com AIOStreams

@@ -479,7 +479,7 @@ export class ConfigController {
     <div class="aio-box">
       <strong>&#128225; URL para AIOStreams</strong>
       <div class="helper">Clique para copiar. Substitua TOKEN pelo seu token real.</div>
-      <code id="aioUrl">${baseUrl}/manifest.json?debridProvider=torbox&amp;torboxToken=TOKEN</code>
+      <code id="aioUrl">${baseUrl}/torbox/TOKEN/manifest.json</code>
     </div>
 
     <div class="divider"></div>

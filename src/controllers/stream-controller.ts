@@ -264,11 +264,12 @@ export class StreamController {
     const base = this.resolveBaseUrl.endsWith('/')
       ? this.resolveBaseUrl
       : `${this.resolveBaseUrl}/`;
-    const url = new URL('resolve', base);
-    url.searchParams.set('token', token);
+    
+    // Novo formato: /provider/token/resolve?magnet=...
+    const url = new URL(`${provider}/${token}/resolve`, base);
+    
     if (magnet) url.searchParams.set('magnet', magnet);
     if (originalUrl) url.searchParams.set('url', originalUrl);
-    if (provider) url.searchParams.set('debridProvider', provider);
     if (linkType) url.searchParams.set('linkType', linkType);
 
     const contextValue = StreamService.encodeStreamContext(context);

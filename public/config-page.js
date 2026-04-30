@@ -54,15 +54,8 @@
       return null;
     }
 
-    var params = [];
-    params.push('debridProvider=' + provider);
-    if (provider === 'torbox') {
-      params.push('torboxToken=' + tb);
-    } else {
-      params.push('realdebridToken=' + rd);
-    }
-
-    return baseUrl + '/manifest.json?' + params.join('&');
+    // Novo formato: /provider/token/manifest.json
+    return baseUrl + '/' + provider + '/' + token + '/manifest.json';
   }
 
   function updateAioUrl() {
@@ -74,7 +67,7 @@
     var baseUrl = getBaseUrl(els);
     var provider = els.provEl.value;
     var tokenKey = provider === 'torbox' ? 'torboxToken' : 'realdebridToken';
-    els.aioUrl.textContent = baseUrl + '/manifest.json?debridProvider=' + provider + '&' + tokenKey + '=TOKEN';
+    els.aioUrl.textContent = baseUrl + '/' + provider + '/TOKEN/manifest.json';
   }
 
   function applyProviderUi() {
@@ -171,10 +164,9 @@
       return;
     }
 
-    // Converte manifest.json?a=1&b=2 para /a=1|b=2/manifest.json para o protocolo stremio://
-    // Isso evita que navegadores ou o Windows cortem a query string no redirecionamento.
-    var pathUrl = url.replace('/manifest.json?', '/').replace(/&/g, '|') + '/manifest.json';
-    window.location.href = 'stremio://' + pathUrl.replace(/^https?:\/\//i, '');
+    // Com o novo formato /provider/TOKEN/manifest.json, nao precisamos mais de conversao complexa
+    // para o protocolo stremio://, pois o Windows/Browsers nao cortam paths como cortam query strings.
+    window.location.href = 'stremio://' + url.replace(/^https?:\/\//i, '');
     
     setTimeout(function () {
       showToast('Se o app nao abriu, use "Copiar URL de instalacao" no modal.');

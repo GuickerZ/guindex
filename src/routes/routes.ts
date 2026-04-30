@@ -58,31 +58,31 @@ export function setupRoutes() {
     reply.send(manifest);
   });
 
-  // Caso com token ou config no caminho
-  fastify.all('/:config/manifest.json', async (req, reply) => {
-    const { config } = req.params as { config: string };
+  // Caso com token simples no caminho (compatibilidade legada)
+  fastify.all('/:token/manifest.json', async (req, reply) => {
+    const { token } = req.params as { token: string };
     const query = req.query as any;
 
-    let pathConfig: any = {};
-    if (config.includes('=')) {
-      pathConfig = Object.fromEntries(config.split('|').map(kv => kv.split('=')));
-    } else {
-      pathConfig = { token: config };
-    }
-    const mergedQuery = { ...query, ...pathConfig };
-
-    const provider = StreamService.extractDebridProvider(mergedQuery, req.headers);
     const debridSelection = StreamService.resolveDebridSelection({
-      query: mergedQuery,
+      query,
       headers: req.headers,
-      routeParams: { token: pathConfig.token },
-      extra: {
-        token: pathConfig.token,
-        torboxToken: provider === 'torbox' ? (pathConfig.token || pathConfig.torboxToken) : undefined,
-        realdebridToken: provider === 'realdebrid' ? (pathConfig.token || pathConfig.realdebridToken) : undefined,
-        debridProvider: provider
-      }
+      routeParams: { token }
     });
+    const manifest = configController.createAddonManifest(!!debridSelection.token);
+    reply.send(manifest);
+  });
+
+  // Novo formato: /provider/token/manifest.json
+  fastify.all('/:provider/:token/manifest.json', async (req, reply) => {
+    const { provider, token } = req.params as { provider: string; token: string };
+    const query = req.query as any;
+
+    const debridSelection = StreamService.resolveDebridSelection({
+      query: { ...query, debridProvider: provider, token: token },
+      headers: req.headers,
+      routeParams: { token: token }
+    });
+
     const manifest = configController.createAddonManifest(!!debridSelection.token);
     reply.send(manifest);
   });
@@ -140,36 +140,21 @@ export function setupRoutes() {
     }
   });
 
-  // ✅ Caso com token ou config no caminho
-  fastify.all('/:config/stream/:type/:id.json', async (req, reply) => {
-    const { config, type, id } = req.params as any;
+  // Caso com token simples no caminho (compatibilidade legada)
+  fastify.all('/:token/stream/:type/:id.json', async (req, reply) => {
+    const { token, type, id } = req.params as any;
     const query = req.query as any;
 
-    let pathConfig: any = {};
-    if (config.includes('=')) {
-      pathConfig = Object.fromEntries(config.split('|').map((kv: string) => kv.split('=')));
-    } else {
-      pathConfig = { token: config };
-    }
-    const mergedQuery = { ...query, ...pathConfig };
-
-    const provider = StreamService.extractDebridProvider(mergedQuery, req.headers);
     const debridSelection = StreamService.resolveDebridSelection({
-      query: mergedQuery,
+      query,
       headers: req.headers,
-      routeParams: { token: pathConfig.token },
-      extra: {
-        token: pathConfig.token,
-        torboxToken: provider === 'torbox' ? (pathConfig.token || pathConfig.torboxToken) : undefined,
-        realdebridToken: provider === 'realdebrid' ? (pathConfig.token || pathConfig.realdebridToken) : undefined,
-        debridProvider: provider
-      }
+      routeParams: { token }
     });
 
     try {
-      const extra: {
-        realdebridToken?: string;
-        torboxToken?: string;
+      const extra: { 
+        realdebridToken?: string; 
+        torboxToken?: string; 
         debridProvider?: string;
         token?: string;
       } = {
@@ -182,7 +167,39 @@ export function setupRoutes() {
       const result = await streamController.handleStreamRequest({ type, id, extra });
       reply.send(result);
     } catch (error) {
-      console.error(`[GuIndex] ❌ Erro no endpoint de stream: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error(`[GuIndex] ❌ Erro no endpoint de stream (legacy): ${error instanceof Error ? error.message : 'Unknown error'}`);
+      reply.send({ streams: [] });
+    }
+  });
+
+  // Novo formato: /provider/token/stream/:type/:id.json
+  fastify.all('/:provider/:token/stream/:type/:id.json', async (req, reply) => {
+    const { provider, token, type, id } = req.params as any;
+    const query = req.query as any;
+
+    const debridSelection = StreamService.resolveDebridSelection({
+      query: { ...query, debridProvider: provider, token: token },
+      headers: req.headers,
+      routeParams: { token: token }
+    });
+
+    try {
+      const extra: { 
+        realdebridToken?: string; 
+        torboxToken?: string; 
+        debridProvider?: string;
+        token?: string;
+      } = {
+        debridProvider: debridSelection.provider,
+        token: debridSelection.token,
+        torboxToken: debridSelection.torboxToken,
+        realdebridToken: debridSelection.realdebridToken
+      };
+
+      const result = await streamController.handleStreamRequest({ type, id, extra });
+      reply.send(result);
+    } catch (error) {
+      console.error(`[GuIndex] ❌ Erro no endpoint de stream (/provider/token): ${error instanceof Error ? error.message : 'Unknown error'}`);
       reply.send({ streams: [] });
     }
   });
@@ -317,6 +334,20 @@ export function setupRoutes() {
       token: params.token,
       magnet: params.magnet,
       provider: query.debridProvider ?? query.provider,
+      ctx: query.ctx,
+      url: query.url,
+      linkType: query.linkType
+    };
+  });
+
+  // Novo formato consistente: /provider/token/resolve
+  registerResolveRoute('/:provider/:token/resolve', (req) => {
+    const { provider, token } = req.params as { provider: string; token: string };
+    const query = req.query as any;
+    return {
+      token,
+      provider,
+      magnet: query.magnet,
       ctx: query.ctx,
       url: query.url,
       linkType: query.linkType
