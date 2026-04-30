@@ -58,19 +58,28 @@ export function setupRoutes() {
     reply.send(manifest);
   });
 
-  // Caso com token no caminho
-  fastify.all('/:token/manifest.json', async (req, reply) => {
-    const { token } = req.params as { token: string };
+  // Caso com token ou config no caminho
+  fastify.all('/:config/manifest.json', async (req, reply) => {
+    const { config } = req.params as { config: string };
     const query = req.query as any;
 
-    const provider = StreamService.extractDebridProvider(query, req.headers);
+    let pathConfig: any = {};
+    if (config.includes('=')) {
+      pathConfig = Object.fromEntries(config.split('|').map(kv => kv.split('=')));
+    } else {
+      pathConfig = { token: config };
+    }
+    const mergedQuery = { ...query, ...pathConfig };
+
+    const provider = StreamService.extractDebridProvider(mergedQuery, req.headers);
     const debridSelection = StreamService.resolveDebridSelection({
-      query,
+      query: mergedQuery,
       headers: req.headers,
-      routeParams: { token },
+      routeParams: { token: pathConfig.token },
       extra: {
-        token,
-        torboxToken: provider === 'torbox' ? token : undefined,
+        token: pathConfig.token,
+        torboxToken: provider === 'torbox' ? (pathConfig.token || pathConfig.torboxToken) : undefined,
+        realdebridToken: provider === 'realdebrid' ? (pathConfig.token || pathConfig.realdebridToken) : undefined,
         debridProvider: provider
       }
     });
@@ -132,18 +141,28 @@ export function setupRoutes() {
     }
   });
 
-  // ✅ Caso com token no caminho
-  fastify.all('/:token/stream/:type/:id.json', async (req, reply) => {
-    const { token, type, id } = req.params as any;
+  // ✅ Caso com token ou config no caminho
+  fastify.all('/:config/stream/:type/:id.json', async (req, reply) => {
+    const { config, type, id } = req.params as any;
     const query = req.query as any;
-    const provider = StreamService.extractDebridProvider(query, req.headers);
+
+    let pathConfig: any = {};
+    if (config.includes('=')) {
+      pathConfig = Object.fromEntries(config.split('|').map((kv: string) => kv.split('=')));
+    } else {
+      pathConfig = { token: config };
+    }
+    const mergedQuery = { ...query, ...pathConfig };
+
+    const provider = StreamService.extractDebridProvider(mergedQuery, req.headers);
     const debridSelection = StreamService.resolveDebridSelection({
-      query,
+      query: mergedQuery,
       headers: req.headers,
-      routeParams: { token },
+      routeParams: { token: pathConfig.token },
       extra: {
-        token,
-        torboxToken: provider === 'torbox' ? token : undefined,
+        token: pathConfig.token,
+        torboxToken: provider === 'torbox' ? (pathConfig.token || pathConfig.torboxToken) : undefined,
+        realdebridToken: provider === 'realdebrid' ? (pathConfig.token || pathConfig.realdebridToken) : undefined,
         debridProvider: provider
       }
     });
@@ -156,8 +175,8 @@ export function setupRoutes() {
         token?: string;
       } = {
         debridProvider: debridSelection.provider,
-        token,
-        torboxToken: provider === 'torbox' ? token : debridSelection.torboxToken
+        token: pathConfig.token,
+        torboxToken: provider === 'torbox' ? pathConfig.token : debridSelection.torboxToken
       };
       if (debridSelection.realdebridToken) {
         extra.realdebridToken = debridSelection.realdebridToken;

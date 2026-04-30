@@ -54,15 +54,15 @@
       return null;
     }
 
-    var params = new URLSearchParams();
-    params.set('debridProvider', provider);
+    var params = [];
+    params.push('debridProvider=' + provider);
     if (provider === 'torbox') {
-      params.set('torboxToken', tb);
+      params.push('torboxToken=' + tb);
     } else {
-      params.set('realdebridToken', rd);
+      params.push('realdebridToken=' + rd);
     }
 
-    return baseUrl + '/manifest.json?' + params.toString();
+    return baseUrl + '/' + params.join('|') + '/manifest.json';
   }
 
   function updateAioUrl() {

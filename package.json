@@ -1,6 +1,6 @@
 {
   "name": "guindex",
-  "version": "2.1.10",
+  "version": "2.2.0",
   "description": "Addon Stremio para conteudo brasileiro - transforma resultados do torrent-indexer em streams diretos via Real-Debrid ou TorBox.",
   "main": "dist/server.js",
   "scripts": {
@@ -8,7 +8,10 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "lint": "eslint src --ext .ts",
-    "test:real-flow": "npm run build && node --test tests/stremio-real-flow.test.mjs"
+    "test:real-flow": "npm run build && node --test tests/stremio-real-flow.test.mjs",
+    "populate:latest": "npx ts-node --esm src/scripts/fetch-latest.ts",
+    "populate:tmdb": "npx ts-node --esm src/scripts/populate-tmdb.ts",
+    "populate:tmdb:all": "npx ts-node --esm src/scripts/populate-tmdb.ts --all"
   },
   "keywords": [
     "stremio",

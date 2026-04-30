@@ -12,7 +12,7 @@ export class ConfigController {
   createAddonManifest(isConfigured: boolean = false): AddonManifest {
     return {
       id: 'org.guindex.addon',
-      version: '2.1.10',
+      version: '2.2.0',
       name: 'GuIndex',
       description:
         'Addon brasileiro para Stremio. Busca torrents nacionais via torrent-indexer e resolve via Real-Debrid ou TorBox.',
@@ -427,18 +427,11 @@ export class ConfigController {
         <img class="logo-mark" src="/logo.png" alt="GuIndex logo">
       </div>
       <div class="logo">Gu<span>Index</span></div>
-      <div class="badge">v2.1.10 &bull; Open Source</div>
+      <div class="badge">v2.2.0 &bull; Open Source</div>
       <div class="subtitle">
         Addon Stremio para torrents brasileiros<br>
         via Real-Debrid ou TorBox
       </div>
-    </div>
-
-    <div class="info-box">
-      &#9889; Powered by <a href="https://github.com/felipemarinho97/torrent-indexer" target="_blank">torrent-indexer</a>
-      &mdash; indexador open source de sites de torrents BR por
-      <a href="https://github.com/felipemarinho97" target="_blank">@felipemarinho97</a>.
-      <br>&#11088; <a href="https://github.com/felipemarinho97/torrent-indexer" target="_blank">De uma estrela no projeto dele!</a>
     </div>
 
     <form id="configForm">
@@ -493,7 +486,6 @@ export class ConfigController {
 
     <div style="text-align:center">
       <a class="star-btn" href="https://github.com/GuickerZ/guindex" target="_blank">&#11088; Dar estrela no GuIndex</a>
-      <a class="star-btn" href="https://github.com/felipemarinho97/torrent-indexer" target="_blank">&#11088; Dar estrela no torrent-indexer</a>
     </div>
 
     <div class="footer">

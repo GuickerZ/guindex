@@ -30,4 +30,13 @@ export interface SourceStream {
   quality?: string;
   releaseGroup?: string;
   context?: StreamContext;
+  
+  // Extended Metadata from Torrent Indexer API
+  videoQuality?: string;
+  audioQuality?: string;
+  genres?: string[];
+  subtitles?: string[];
+  duration?: string;
+  classification?: string;
+  contextString?: string;
 }

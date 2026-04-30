@@ -101,17 +101,14 @@ Stremio/AIOStreams
 
 ### Mapa de indexers
 
-| Indexer | IMDB | Titulo EN | Titulo PT-BR | Velocidade | Notas |
-|---------|:----:|:---------:|:------------:|:----------:|-------|
-| `torrent-dos-filmes` | ✅ | ✅ | ✅ | 2-3s | Mais completo, suporta IMDB direto |
-| `starck-filmes` | ❌ | ✅ | ✅✅ | 1-2s | Mais rapido, muitos resultados mas com ruido |
-| `vaca_torrent` | ❌ | ✅ | ✅✅ | 2-5s | Excelente cobertura PT-BR, sem campo `size` |
-| `rede_torrent` | ❌ | ✅ | ✅ | 1-3s | Bom equilibrio, so funciona com titulo puro (sem SxxEyy) |
-
-**Desativados por padrao** (instáveis):
-- `comando_torrents` — timeout constante
-- `bludv` — Cloudflare bloqueio frequente
-- `filme_torrent` — fora do ar
+| Indexer | Status | Velocidade (Pós-Cache) | Notas |
+|---------|:----:|:----------:|-------|
+| `torrent-dos-filmes` | 🟢 Ativo | < 10ms | Excelente para dual-áudio |
+| `starck-filmes` | 🟢 Ativo | < 10ms | Resultados precisos e lançamentos |
+| `vaca_torrent` | 🟢 Ativo | < 10ms | Forte em conteúdo exclusivo |
+| `rede_torrent` | 🟢 Ativo | < 10ms | Bom equilíbrio geral |
+| `bludv` | 🟢 Ativo | < 10ms | Mestre em qualidade 4K / x265 |
+| `comando_torrents` | 🟢 Ativo | < 10ms | O clássico brasileiro |
 
 > Os indexers que nao suportam IMDB recebem queries com titulo textual (EN e PT-BR) em vez de `ttXXXXXXX`. A resolucao PT-BR via TMDB e essencial para maximizar hits nesses indexers.
 
@@ -126,6 +123,18 @@ Stremio/AIOStreams
 </p>
 
 O GuIndex usa uma **instancia self-hosted** do torrent-indexer rodando em VPS propria com Docker, junto com Meilisearch (cache de busca), Redis (cache de sessoes), e FlareSolverr (bypass Cloudflare).
+
+---
+
+## Scripts de Automação (Novo!)
+
+O GuIndex v2.2.0 introduziu scripts para popular e manter o banco de dados do Meilisearch "quente" automaticamente:
+
+- `npm run populate:latest` — Varre os lançamentos recentes da página principal de todos os trackers. (Recomendado rodar a cada 8h).
+- `npm run populate:tmdb` — Varre as tendências atuais de séries e filmes no TMDB e pré-busca tudo. (Recomendado rodar a cada 24h).
+- `npm run populate:tmdb:all` — Faz uma varredura extrema de até 500 páginas do TMDB. Ideal para o primeiro deploy.
+
+---
 
 ---
 
@@ -346,7 +355,7 @@ npm start
 | Variavel | Padrao | Descricao |
 |----------|--------|-----------|
 | `TMDB_API_KEY` | — | Chave da API TMDB (v3) |
-| `TMDB_API_READ_ACCESS_TOKEN` | — | Ou token Bearer do TMDB (alternativa) |
+| `TMDB_PAGES` | `5` | Quantidade de páginas para rodar no `npm run populate:tmdb` |
 | `TORRENT_INDEXER_TMDB_TIMEOUT_MS` | `5000` | Timeout de consulta ao TMDB |
 
 > A chave TMDB e **altamente recomendada**. Sem ela, indexers como `starck-filmes` e `vaca_torrent` (que nao suportam IMDB) terao cobertura muito menor para titulos que diferem entre EN e PT-BR (ex: "Wednesday" → "Wandinha", "Inside Out 2" → "Divertida Mente 2").
