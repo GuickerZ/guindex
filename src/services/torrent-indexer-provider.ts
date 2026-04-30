@@ -133,6 +133,8 @@ interface FallbackSearchOptions {
   maxIndexers?: number;
   perIndexerLimit?: number;
   targetResults?: number;
+  timeoutMs?: number;
+  limitQueries?: number;
 }
 
 const parsePositiveInt = (value: string | undefined, fallback: number): number => {
@@ -654,11 +656,12 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       logReq(context, `✅ Fase 1 (Fast-path) encontrou ${streams.length} streams finais para '${id}'.`);
       await this.decorateWithDebrid(streams, options);
 
-      // Background warming: dispara a busca nos indexadores em background com fila global
-      logReq(context, `📡 Enfileirando job em background (Slow-path) para atualização do cache...`);
+      // 3. BACKGROUND FULL UPDATE (quando Fast-path atende)
+      logReq(context, `📡 Enfileirando job em background (Slow-path completo) para atualização profunda do cache...`);
       this.enqueueBackgroundWarming(async () => {
         try {
-          await this.fetchMultiSearchResults(uniqueQueries, false, context);
+          // Passamos limitQueries: 10 e timeoutMs: 40000 para forçar uma busca pesada em tudo no background
+          await this.fetchMultiSearchResults(uniqueQueries, false, context, { timeoutMs: 40000, limitQueries: 10 });
         } catch (err) {
           logReq(context, `⚠️ Erro no background cache warming: ${err instanceof Error ? err.message : String(err)}`);
         }
@@ -667,16 +670,18 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       return streams;
     }
 
-    logReq(context, `⚠️ Fase 1 (Fast-path) insuficiente (${streams.length} streams). Iniciando Fase 2 (Slow-path)...`);
+    // 2. MID-PATH (Espera até 9.5s para retornar ao AIOStreams)
+    logReq(context, `⚠️ Fase 1 (Fast-path) insuficiente (${streams.length} streams). Iniciando Fase 2 (Mid-path 10s)...`);
 
-    const slowRawTorrents = await this.fetchMultiSearchResults(uniqueQueries, false, context);
-    const slowTorrents = this.rankTorrentsByQuery(slowRawTorrents, targetTitle ?? uniqueQueries[0] ?? id);
+    // Usamos um timeout seguro de 9.5s e limitamos as queries para não travar o backend
+    const midRawTorrents = await this.fetchMultiSearchResults(uniqueQueries, false, context, { timeoutMs: 9500, limitQueries: 3 });
+    const midTorrents = this.rankTorrentsByQuery(midRawTorrents, targetTitle ?? uniqueQueries[0] ?? id);
 
     seen.clear();
     streams.length = 0;
     sourceCounts.clear();
 
-    for (const torrent of slowTorrents) {
+    for (const torrent of midTorrents) {
       if (!this.isRelevantTorrent(torrent, context)) continue;
       const stream = this.mapTorrentToStream(torrent, targetTitle ?? uniqueQueries[0] ?? id, context);
       if (!stream) continue;
@@ -697,6 +702,17 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
     await this.decorateWithDebrid(streams, options);
     logReq(context, `✅ Retornando ${streams.length} streams finais para '${id}'`);
+
+    // 3. BACKGROUND FULL UPDATE (quando Mid-path é acionado)
+    logReq(context, `📡 Enfileirando job em background (Slow-path completo) pós Mid-path para garantir todas as sources no cache...`);
+    this.enqueueBackgroundWarming(async () => {
+      try {
+        await this.fetchMultiSearchResults(uniqueQueries, false, context, { timeoutMs: 40000, limitQueries: 10 });
+      } catch (err) {
+        logReq(context, `⚠️ Erro no background cache warming pós Mid-path: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
+
     return streams;
   }
 
@@ -914,12 +930,14 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     options?: FallbackSearchOptions,
     context?: MatchContext,
   ): Promise<TorrentLike[]> {
+    if (!TorrentIndexerProvider.ENABLE_FALLBACK_INDEXER_SEARCH) return [];
     if (!queries || queries.length === 0) return [];
 
-    // Limita para as 3 queries mais importantes para não sobrecarregar os indexadores e causar timeout
-    const topQueries = queries.slice(0, 3);
+    const timeout = options?.timeoutMs ?? 20000;
+    const limit = options?.limitQueries ?? 3;
+    const topQueries = queries.slice(0, limit);
 
-    logReq(context, `🐢 Slow-path iniciado: Buscando [${topQueries.join(', ')}] via /indexers/all`);
+    logReq(context, `🐢 Scrape iniciado: Buscando [${topQueries.join(', ')}] via /indexers/all`);
 
     const url = new URL(`${this.baseUrl}/indexers/all`);
     for (const q of topQueries) {
@@ -928,7 +946,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
     try {
       const response = await request(url.toString(), {
-        signal: AbortSignal.timeout(20_000), // timeout ampliado para 20s
+        signal: AbortSignal.timeout(timeout),
         headers: { Accept: 'application/json' },
       });
       if (response.statusCode >= 400) {
