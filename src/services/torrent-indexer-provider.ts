@@ -865,7 +865,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       return searchResults;
     }
 
-    const indexerResults = await this.fetchMultiSearchResultsFromIndexers(queries, {}, context);
+    const indexerResults = await this.fetchMultiSearchResultsFromIndexers(queries, options, context);
 
     const merged = this.rankTorrentsByQuery(
       this.mergeTorrentResults(searchResults, indexerResults),
@@ -884,16 +884,16 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     if (uniqueQueries.length === 0) return [];
 
     const url = new URL(`${this.baseUrl}/search`);
-    for (const q of uniqueQueries) {
-      url.searchParams.append('q', q);
-    }
-
     try {
       const response = await request(url.toString(), {
-        method: 'GET',
+        method: 'POST',
         headers: {
+          'Content-Type': 'application/json',
           'Accept': 'application/json'
         },
+        body: JSON.stringify({
+          queries: uniqueQueries
+        }),
         signal: AbortSignal.timeout(6_000),
       });
       if (response.statusCode >= 400) {
@@ -913,7 +913,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
     const relevantResults = results.filter(r => this.isRelevantTorrent(r, context));
 
-    if (relevantResults.length < 2) return false;
+    if (relevantResults.length < 1) return false;
 
     const uniqueIndexers = this.collectIndexerSlugs(relevantResults);
     const isSufficient = uniqueIndexers.size >= 1;
