@@ -882,32 +882,27 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     const uniqueQueries = [...new Set(queries.filter(q => q.trim().length > 0))];
     if (uniqueQueries.length === 0) return [];
 
-    // Fast-path é muito leve (banco de dados local/Meilisearch), então podemos disparar 
-    // todas as queries de forma independente e paralela para garantir que nenhuma seja ignorada.
-    const promises = uniqueQueries.map(async (q) => {
-      const url = new URL(`${this.baseUrl}/search`);
-      url.searchParams.set('q', q);
+    const url = new URL(`${this.baseUrl}/search`);
+    for (const q of uniqueQueries) {
+      url.searchParams.append('q', q);
+    }
 
-      try {
-        const response = await request(url.toString(), {
-          method: 'GET',
-          headers: { Accept: 'application/json' },
-          signal: AbortSignal.timeout(4_000),
-        });
-        if (response.statusCode >= 400) {
-          logReq({}, `❌ Erro no /search HTTP ${response.statusCode} para query '${q}'`);
-          return [];
-        }
-        const payload = await response.body.json();
-        return this.normalizeTorrentPayload(payload);
-      } catch (err) {
-        logReq({}, `❌ Erro na conexão com /search para query '${q}': ${err instanceof Error ? err.message : String(err)}`);
+    try {
+      const response = await request(url.toString(), {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(6_000),
+      });
+      if (response.statusCode >= 400) {
+        logReq({}, `❌ Erro no /search HTTP ${response.statusCode}: ${await response.body.text()}`);
         return [];
       }
-    });
-
-    const resultsArray = await Promise.all(promises);
-    return resultsArray.flat();
+      const payload = await response.body.json();
+      return this.normalizeTorrentPayload(payload);
+    } catch (err) {
+      logReq({}, `❌ Erro na conexão com /search: ${err instanceof Error ? err.message : String(err)}`);
+      return [];
+    }
   }
 
   private hasSufficientResults(results: TorrentLike[], query: string, context: MatchContext): boolean {
