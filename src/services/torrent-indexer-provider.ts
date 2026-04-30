@@ -634,6 +634,9 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
     const torrents = this.rankTorrentsByQuery(rawTorrents, targetTitle ?? uniqueQueries[0] ?? id);
 
+    let validFastPathStreams = 0;
+    const validFastPathSources = new Set<string>();
+
     for (const torrent of torrents) {
       if (!this.isRelevantTorrent(torrent, context)) continue;
       const stream = this.mapTorrentToStream(torrent, targetTitle ?? uniqueQueries[0] ?? id, context);
@@ -650,10 +653,17 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       sourceCounts.set(sourceKey, sourceCount + 1);
       if (dedupeKey) seen.add(dedupeKey);
 
+      // Não conta o Mico-Leão Dublado para decidir se o Fast-Path foi suficiente
+      // Isso força a busca por outros indexadores caso o Meilisearch só tenha coisas do Mico-Leão
+      if (!sourceKey.includes('mico') && !sourceKey.includes('leao') && !sourceKey.includes('leão')) {
+        validFastPathStreams++;
+        validFastPathSources.add(sourceKey);
+      }
+
       if (streams.length >= MAX_STREAMS) break;
     }
 
-    if (streams.length >= TARGET_STREAMS_PER_REQUEST && sourceCounts.size >= 2) {
+    if (validFastPathStreams >= TARGET_STREAMS_PER_REQUEST && validFastPathSources.size >= 2) {
       logReq(context, `✅ Fase 1 (Fast-path) encontrou ${streams.length} streams finais para '${id}'.`);
       await this.decorateWithDebrid(streams, options);
 
