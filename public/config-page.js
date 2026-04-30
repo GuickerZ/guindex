@@ -62,7 +62,7 @@
       params.push('realdebridToken=' + rd);
     }
 
-    return baseUrl + '/' + params.join('|') + '/manifest.json';
+    return baseUrl + '/manifest.json?' + params.join('&');
   }
 
   function updateAioUrl() {

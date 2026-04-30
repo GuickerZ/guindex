@@ -137,7 +137,6 @@ export function setupRoutes() {
     } catch (error) {
       console.error(`[GuIndex] ❌ Erro no endpoint de stream: ${error instanceof Error ? error.message : 'Unknown error'}`);
       reply.send({ streams: [] });
-      return fastify;
     }
   });
 
@@ -175,15 +174,10 @@ export function setupRoutes() {
         token?: string;
       } = {
         debridProvider: debridSelection.provider,
-        token: pathConfig.token,
-        torboxToken: provider === 'torbox' ? pathConfig.token : debridSelection.torboxToken
+        token: debridSelection.token,
+        torboxToken: debridSelection.torboxToken,
+        realdebridToken: debridSelection.realdebridToken
       };
-      if (debridSelection.realdebridToken) {
-        extra.realdebridToken = debridSelection.realdebridToken;
-      }
-      if (debridSelection.torboxToken) {
-        extra.torboxToken = debridSelection.torboxToken;
-      }
 
       const result = await streamController.handleStreamRequest({ type, id, extra });
       reply.send(result);
@@ -301,19 +295,15 @@ export function setupRoutes() {
   };
 
   registerResolveRoute('/resolve', (req) => {
-    const query = req.query as {
-      token?: string;
-      magnet?: string;
-      ctx?: string;
-      debridProvider?: string;
-      provider?: string;
-      url?: string;
-      linkType?: string;
-    };
+    const query = req.query as any;
+    const provider = query.debridProvider ?? query.provider;
+    const token = query.token || 
+                  (provider === 'torbox' ? (query.torboxToken || query.tbToken) : (query.realdebridToken || query.rdToken));
+
     return {
-      token: query.token,
+      token: token,
       magnet: query.magnet,
-      provider: query.debridProvider ?? query.provider,
+      provider: provider,
       ctx: query.ctx,
       url: query.url,
       linkType: query.linkType

@@ -837,14 +837,18 @@ export class StreamService {
   static extractTorboxToken(
     query: any,
     headers: any,
-    extra?: { torboxToken?: string }
+    extra?: { torboxToken?: string; token?: string },
+    params?: { token?: string }
   ): string | undefined {
     const token =
       query.torboxToken ||
       query.tbToken ||
+      query.token ||
       headers['x-tb-token'] ||
       headers['x-torbox-token'] ||
-      extra?.torboxToken;
+      extra?.torboxToken ||
+      extra?.token ||
+      params?.token;
 
     if (token && token.length > 10) {
       return token;
@@ -885,7 +889,8 @@ export class StreamService {
     const provider = this.extractDebridProvider(query, headers, extra);
     const realdebridToken =
       this.extractRealDebridToken(query, headers, extra, routeParams) || env?.realdebridToken;
-    const torboxToken = this.extractTorboxToken(query, headers, extra) || env?.torboxToken;
+    const torboxToken =
+      this.extractTorboxToken(query, headers, extra, routeParams) || env?.torboxToken;
 
     if (provider === 'torbox') {
       return { provider, token: torboxToken, realdebridToken, torboxToken };
