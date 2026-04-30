@@ -673,8 +673,8 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     // 2. MID-PATH (Espera até 9.5s para retornar ao AIOStreams)
     logReq(context, `⚠️ Fase 1 (Fast-path) insuficiente (${streams.length} streams). Iniciando Fase 2 (Mid-path 10s)...`);
 
-    // Usamos um timeout seguro de 9.5s e limitamos as queries para não travar o backend
-    const midRawTorrents = await this.fetchMultiSearchResults(uniqueQueries, false, context, { timeoutMs: 9500, limitQueries: 3 });
+    // Usamos um timeout seguro de 9.5s, mandamos TODAS as queries (sem limite), mas limitamos aos 3 indexadores mais rápidos
+    const midRawTorrents = await this.fetchMultiSearchResults(uniqueQueries, false, context, { timeoutMs: 9500, maxIndexers: 3 });
     const midTorrents = this.rankTorrentsByQuery(midRawTorrents, targetTitle ?? uniqueQueries[0] ?? id);
 
     seen.clear();
@@ -931,6 +931,40 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     if (!queries || queries.length === 0) return [];
 
     const timeout = options?.timeoutMs ?? 20000;
+
+    // Se maxIndexers for definido, disparamos requests paralelos apenas para os melhores indexadores
+    // mas com TODAS as queries! Isso é ideal para o Mid-path.
+    if (options?.maxIndexers && options.maxIndexers > 0) {
+      const indexerNames = await this.fetchIndexerNames();
+      const targetIndexers = indexerNames.slice(0, options.maxIndexers);
+
+      if (targetIndexers.length > 0) {
+        logReq(context, `🐢 Mid-path iniciado: Buscando [${queries.join(', ')}] nos top indexadores [${targetIndexers.join(', ')}] (Timeout: ${timeout}ms)`);
+        
+        const promises = targetIndexers.map(async (indexer) => {
+          const url = new URL(`${this.baseUrl}/indexers/${indexer}`);
+          for (const q of queries) {
+            url.searchParams.append('q', q);
+          }
+          try {
+            const response = await request(url.toString(), {
+              signal: AbortSignal.timeout(timeout),
+              headers: { Accept: 'application/json' },
+            });
+            if (response.statusCode >= 400) return [];
+            const payload = await response.body.json();
+            return this.normalizeTorrentPayload(payload);
+          } catch (err) {
+            logReq(context, `❌ Erro no indexer ${indexer}: ${err instanceof Error ? err.message : String(err)}`);
+            return [];
+          }
+        });
+
+        const resultsArray = await Promise.all(promises);
+        return resultsArray.flat();
+      }
+    }
+
     const limit = options?.limitQueries ?? 3;
     const topQueries = queries.slice(0, limit);
 
