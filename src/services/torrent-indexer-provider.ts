@@ -488,6 +488,39 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
   );
   private static readonly TMDB_API_KEY = readEnv('TMDB_API_KEY');
 
+  private static globalQueue: Array<() => Promise<void>> = [];
+  private static globalQueueRunning = 0;
+  private static readonly GLOBAL_QUEUE_CONCURRENCY = parsePositiveInt(
+    process.env.TORRENT_INDEXER_GLOBAL_QUEUE_CONCURRENCY,
+    1,
+  );
+  private static readonly GLOBAL_QUEUE_DELAY_MS = parsePositiveInt(
+    process.env.TORRENT_INDEXER_GLOBAL_QUEUE_DELAY_MS,
+    1500,
+  );
+
+  private enqueueBackgroundWarming(task: () => Promise<void>) {
+    TorrentIndexerProvider.globalQueue.push(task);
+    this.processGlobalQueue();
+  }
+
+  private async processGlobalQueue() {
+    if (TorrentIndexerProvider.globalQueueRunning >= TorrentIndexerProvider.GLOBAL_QUEUE_CONCURRENCY) {
+      return;
+    }
+    const task = TorrentIndexerProvider.globalQueue.shift();
+    if (!task) return;
+
+    TorrentIndexerProvider.globalQueueRunning++;
+    try {
+      await task();
+    } catch (e) {
+      // Ignora erro do background task
+    } finally {
+      TorrentIndexerProvider.globalQueueRunning--;
+      setTimeout(() => this.processGlobalQueue(), TorrentIndexerProvider.GLOBAL_QUEUE_DELAY_MS);
+    }
+  }
 
   constructor(name: string, baseUrl: string) {
     super(name);
@@ -621,10 +654,14 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       logReq(context, `✅ Fase 1 (Fast-path) encontrou ${streams.length} streams finais para '${id}'.`);
       await this.decorateWithDebrid(streams, options);
 
-      // Background warming: dispara a busca nos indexadores em background para manter o cache (Meilisearch) quente
-      logReq(context, `📡 Disparando job em background (Slow-path) para atualização do cache...`);
-      this.fetchMultiSearchResults(uniqueQueries, false, context).catch(err => {
-        logReq(context, `⚠️ Erro no background cache warming: ${err instanceof Error ? err.message : String(err)}`);
+      // Background warming: dispara a busca nos indexadores em background com fila global
+      logReq(context, `📡 Enfileirando job em background (Slow-path) para atualização do cache...`);
+      this.enqueueBackgroundWarming(async () => {
+        try {
+          await this.fetchMultiSearchResults(uniqueQueries, false, context);
+        } catch (err) {
+          logReq(context, `⚠️ Erro no background cache warming: ${err instanceof Error ? err.message : String(err)}`);
+        }
       });
 
       return streams;
@@ -856,10 +893,10 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
     const relevantResults = results.filter(r => this.isRelevantTorrent(r, context));
 
-    if (relevantResults.length < TorrentIndexerProvider.HYBRID_MIN_RESULTS) return false;
+    if (relevantResults.length < 2) return false;
 
     const uniqueIndexers = this.collectIndexerSlugs(relevantResults);
-    const isSufficient = uniqueIndexers.size >= TorrentIndexerProvider.HYBRID_MIN_INDEXERS;
+    const isSufficient = uniqueIndexers.size >= 2;
     if (isSufficient) {
       logReq(context, `⚡ Fast-path aprovou '${query}': ${relevantResults.length} resultados válidos em ${uniqueIndexers.size} indexadores.`);
     }
@@ -873,7 +910,6 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     options?: FallbackSearchOptions,
     context?: MatchContext,
   ): Promise<TorrentLike[]> {
-    if (!TorrentIndexerProvider.ENABLE_FALLBACK_INDEXER_SEARCH) return [];
     if (!queries || queries.length === 0) return [];
 
     logReq(context, `🐢 Slow-path iniciado: Buscando [${queries.join(', ')}] via /indexers/all`);
