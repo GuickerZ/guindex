@@ -942,19 +942,33 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
         logReq(context, `🐢 Mid-path iniciado: Buscando [${queries.join(', ')}] nos top indexadores [${targetIndexers.join(', ')}] (Timeout: ${timeout}ms)`);
         
         const promises = targetIndexers.map(async (indexer) => {
+          const startedAt = Date.now();
+          const normalizedIndexer = this.normalizeIndexerSlug(indexer);
+          
           const url = new URL(`${this.baseUrl}/indexers/${indexer}`);
           for (const q of queries) {
             url.searchParams.append('q', q);
           }
+          
           try {
             const response = await request(url.toString(), {
               signal: AbortSignal.timeout(timeout),
               headers: { Accept: 'application/json' },
             });
-            if (response.statusCode >= 400) return [];
+            if (response.statusCode >= 400) {
+              this.recordIndexerFailure(normalizedIndexer);
+              this.recordIndexerPerformance(normalizedIndexer, Date.now() - startedAt, 0);
+              return [];
+            }
             const payload = await response.body.json();
-            return this.normalizeTorrentPayload(payload);
+            const results = this.normalizeTorrentPayload(payload);
+            
+            this.clearIndexerFailure(normalizedIndexer);
+            this.recordIndexerPerformance(normalizedIndexer, Date.now() - startedAt, results.length);
+            return results;
           } catch (err) {
+            this.recordIndexerFailure(normalizedIndexer);
+            this.recordIndexerPerformance(normalizedIndexer, Date.now() - startedAt, 0);
             logReq(context, `❌ Erro no indexer ${indexer}: ${err instanceof Error ? err.message : String(err)}`);
             return [];
           }
