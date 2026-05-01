@@ -663,14 +663,9 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       return fastPathStreams;
     }
 
-    // Always allow mid-path (Fase 2: /indexers/all bulk-search) to be tried when Fase 1 produces no streams
-    // In fresh=1 mode, mid-path will exclude bludv and strip years for speed
+    // Always allow mid-path (Fase 2: bulk-search via indexers rápidos) to be tried when Fase 1 produces no streams
     const indexerResults = await this.fetchBulkSearchResultsFromIndexers(midPathQueries, {
       timeoutMs: 8000,
-      excludeIndexers: forceFresh ? new Set(['bludv', 'bludv_xyz']) : undefined,
-      limitQueries: 3,
-      perIndexerLimit: forceFresh ? Math.max(6, TorrentIndexerProvider.FALLBACK_PER_INDEXER_LIMIT || 6) : TorrentIndexerProvider.FALLBACK_PER_INDEXER_LIMIT,
-      excludeNamesWithYear: false,
     }, context);
 
     const midPathStreams = this.collectStreamsFromTorrents(
@@ -947,7 +942,6 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
   private async fetchMeilisearchResults(query: string): Promise<TorrentLike[]> {
     const url = new URL(`${this.baseUrl}/search`);
     url.searchParams.set('q', query);
-    url.searchParams.set('limit', '200');
     try {
       const response = await request(url.toString(), {
         signal: AbortSignal.timeout(5_000),
@@ -1055,7 +1049,6 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
           this.fetchSingleIndexerSearch(
             name,
             query,
-            perIndexerLimit,
           ),
         ),
       );
@@ -1144,17 +1137,11 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       return searchResults;
     }
 
-    // 2) Fase 2: Mid-Path (Sync Scrape via indexers específicos em paralelo)
+    // 2) Fase 2: Mid-Path (Sync Scrape via indexers específicos rápidos)
     // Sempre usar as 3 queries otimizadas (IMDB ID, titulo inglês, titulo português)
-    // Timeout reduzido para ~8s que é mais adequado para Stremio
     const queriesToUse = midPathQueries && midPathQueries.length > 0 ? midPathQueries : queries.slice(0, 3);
     const indexerResults = await this.fetchBulkSearchResultsFromIndexers(queriesToUse, {
       timeoutMs: 8000,
-      excludeIndexers: forceFresh ? new Set(['bludv', 'bludv_xyz']) : undefined,
-      maxIndexers: 4,
-      limitQueries: 3,
-      perIndexerLimit: forceFresh ? Math.max(6, TorrentIndexerProvider.FALLBACK_PER_INDEXER_LIMIT || 6) : TorrentIndexerProvider.FALLBACK_PER_INDEXER_LIMIT,
-      excludeNamesWithYear: false,
     }, context);
 
     const merged = this.rankTorrentsByQuery(
@@ -1203,14 +1190,8 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     if (!TorrentIndexerProvider.ENABLE_FALLBACK_INDEXER_SEARCH) return [];
     if (!queries || queries.length === 0) return [];
 
-    const timeout = options?.timeoutMs ?? 25000;
-    const limit = options?.limitQueries ?? 3;
-    let topQueries = queries.slice(0, limit);
-    // Optionally strip trailing year from queries to speed up slow indexers
-    if (options?.excludeNamesWithYear) {
-      topQueries = topQueries.map(q => q.replace(/\s(19|20)\d{2}$/, '').trim());
-    }
-    const excluded = options?.excludeIndexers;
+    const timeout = options?.timeoutMs ?? 8000;
+    const topQueries = queries.slice(0, 3);
 
     try {
       const indexers = await this.fetchIndexerNames();
@@ -1218,116 +1199,61 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
         return [];
       }
 
-      const configuredMax = TorrentIndexerProvider.FALLBACK_MAX_INDEXERS;
-      const defaultMaxIndexers = configuredMax > 0
-        ? Math.min(configuredMax, indexers.length)
-        : indexers.length;
-      const maxIndexers = options?.maxIndexers ?? Math.min(4, defaultMaxIndexers);
+      // Calcular média de tempo e selecionar apenas indexers rápidos (média + 30% margem)
+      const avgTimes = Array.from(TorrentIndexerProvider.indexerPerformance.values())
+        .map(s => s.avgMs)
+        .filter(ms => ms > 0);
+      const overallAvg = avgTimes.length > 0 
+        ? avgTimes.reduce((a, b) => a + b, 0) / avgTimes.length 
+        : 500;
+      const maxAllowedMs = overallAvg * 1.3;
+
       const selected = indexers
         .filter((name) => {
           if (this.shouldSkipIndexer(name)) {
             return false;
           }
-          if (!excluded || excluded.size === 0) {
+          const slug = this.normalizeIndexerSlug(name);
+          const perf = TorrentIndexerProvider.indexerPerformance.get(slug);
+          if (!perf || perf.avgMs === 0) {
             return true;
           }
-          const normalized = this.normalizeIndexerSlug(name);
-          return !excluded.has(normalized);
+          return perf.avgMs <= maxAllowedMs;
         })
         .sort((a, b) => this.compareIndexerPriority(a, b))
-        .slice(0, maxIndexers);
+        .slice(0, 4);
 
       if (selected.length === 0) {
         return [];
       }
 
-      logReq(context, `🐢 Bulk-Search: Buscando [${topQueries.join(', ')}] em ${selected.length} indexadores específicos (Timeout: ${timeout}ms)`);
+      const indexersList = selected.join(',');
+      logReq(context, `🐢 Bulk-Search: Buscando [${topQueries.join(', ')}] em [${indexersList}] (Timeout: ${timeout}ms)`);
 
-      const settled: PromiseSettledResult<TorrentLike[]>[] = [];
-      for (let i = 0; i < selected.length; i += TorrentIndexerProvider.FALLBACK_INDEXER_CONCURRENCY) {
-        const batch = selected.slice(i, i + TorrentIndexerProvider.FALLBACK_INDEXER_CONCURRENCY);
-        const batchSettled = await Promise.allSettled(
-          batch.map((name) =>
-            this.fetchBulkSearchFromSingleIndexer(
-              name,
-              topQueries,
-              options?.perIndexerLimit ?? TorrentIndexerProvider.FALLBACK_PER_INDEXER_LIMIT,
-              timeout,
-              context,
-            ),
-          ),
-        );
-        settled.push(...batchSettled);
+      const url = new URL(`${this.baseUrl}/indexers`);
+      for (const q of topQueries) {
+        url.searchParams.append('q', q);
       }
+      url.searchParams.set('indexers', indexersList);
 
-      const merged: TorrentLike[] = [];
-      for (const item of settled) {
-        if (item.status === 'fulfilled' && item.value.length > 0) {
-          merged.push(...item.value);
-        }
-      }
-
-      return merged;
-    } catch (err) {
-      logReq(context, `❌ Erro no bulk por indexador específico: ${err instanceof Error ? err.message : String(err)}`);
-      return [];
-    }
-  }
-
-  private async fetchBulkSearchFromSingleIndexer(
-    indexerName: string,
-    queries: string[],
-    limit: number,
-    timeout: number,
-    context?: MatchContext,
-  ): Promise<TorrentLike[]> {
-    const normalizedIndexer = indexerName.trim().toLowerCase();
-    if (this.shouldSkipIndexer(normalizedIndexer)) {
-      return [];
-    }
-
-    const url = new URL(`${this.baseUrl}/indexers/${encodeURIComponent(indexerName)}`);
-    for (const q of queries) {
-      url.searchParams.append('q', q);
-    }
-    if (limit > 0) {
-      url.searchParams.set('limit', String(limit));
-    }
-
-    const startedAt = Date.now();
-    try {
       const response = await request(url.toString(), {
         signal: AbortSignal.timeout(timeout),
         headers: { Accept: 'application/json' },
       });
-      if (response.statusCode >= 500) {
-        this.recordIndexerFailure(normalizedIndexer);
-        this.recordIndexerPerformance(normalizedIndexer, Date.now() - startedAt, 0);
-        return [];
-      }
-      if (response.statusCode >= 400) {
-        this.recordIndexerPerformance(normalizedIndexer, Date.now() - startedAt, 0);
-        return [];
-      }
-
+      if (response.statusCode >= 400) return [];
       const payload = await response.body.json();
-      const results = this.normalizeTorrentPayload(payload);
-      this.clearIndexerFailure(normalizedIndexer);
-      this.recordIndexerPerformance(normalizedIndexer, Date.now() - startedAt, results.length);
-      logReq(context, `🐢 Bulk indexer '${indexerName}' retornou ${results.length} resultados.`);
-      return results;
+      return this.normalizeTorrentPayload(payload);
     } catch (err) {
-      this.recordIndexerFailure(normalizedIndexer);
-      this.recordIndexerPerformance(normalizedIndexer, Date.now() - startedAt, 0);
-      logReq(context, `❌ Erro no bulk do indexer '${indexerName}': ${err instanceof Error ? err.message : String(err)}`);
+      logReq(context, `❌ Erro no bulk: ${err instanceof Error ? err.message : String(err)}`);
       return [];
     }
   }
 
+
+
   private async fetchSingleIndexerSearch(
     indexerName: string,
     query: string,
-    limit: number,
   ): Promise<TorrentLike[]> {
     const normalizedIndexer = indexerName.trim().toLowerCase();
     if (this.shouldSkipIndexer(normalizedIndexer)) {
@@ -1343,9 +1269,6 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     const startedAt = Date.now();
     const url = new URL(`${this.baseUrl}/indexers/${encodeURIComponent(indexerName)}`);
     url.searchParams.set('q', query);
-    if (limit > 0) {
-      url.searchParams.set('limit', String(limit));
-    }
 
     try {
       const response = await request(url.toString(), {
