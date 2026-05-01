@@ -634,9 +634,16 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     const uniqueQueries = [...new Set(queries.filter(q => q.trim().length > 0))];
     logReq(context, `🚀 Iniciando busca multi-query (Bulk) para: [${uniqueQueries.join(', ')}]`);
 
-    // Always allow mid-path (Fase 2: /indexers/all bulk-search) to be tried when Fase 1 is insufficient
-    // In fresh=1 mode, mid-path will exclude bludv and strip years for speed
-    const rawTorrents = await this.fetchMultiSearchResults(uniqueQueries, false, context, forceFresh, midPathQueries);
+    const fallbackTitle = targetTitle || queries[0] || id;
+    const fastPathTorrents = await this.fetchBulkMeilisearchResults(uniqueQueries);
+    const fastPathStreams = this.collectStreamsFromTorrents(
+      fastPathTorrents,
+      fallbackTitle,
+      context,
+      seen,
+      sourceCounts,
+      150,
+    );
 
     // If not in fresh=1 mode, warm remaining query candidates in background for slow-path
     if (!forceFresh && uniqueQueries.length < MAX_TEXT_QUERIES) {
@@ -646,31 +653,44 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       }
     }
 
-    for (const torrent of rawTorrents) {
-      if (!this.isRelevantTorrent(torrent, context)) continue;
-      const fallback = targetTitle || queries[0] || id;
-      const stream = this.mapTorrentToStream(torrent, fallback, context);
-      if (!stream) continue;
+    if (fastPathStreams.length > 0) {
+      if (!forceFresh) {
+        this.warmIndexerCacheInBackground(fallbackTitle, fastPathTorrents, context);
+      }
 
-      const dedupeKey = this.getDedupeKey(stream);
-      if (dedupeKey && seen.has(dedupeKey)) continue;
-
-      const sourceKey = (stream.source ?? 'unknown').toLowerCase();
-      const sourceCount = sourceCounts.get(sourceKey) ?? 0;
-      if (sourceCount >= 40) continue;
-
-      streams.push(stream);
-      sourceCounts.set(sourceKey, sourceCount + 1);
-      if (dedupeKey) seen.add(dedupeKey);
-
-      if (streams.length >= 150) break;
+      await this.decorateWithDebrid(fastPathStreams, options);
+      logReq(context, `✅ Retornando ${fastPathStreams.length} streams finais para '${id}'`);
+      return fastPathStreams;
     }
 
-    if (streams.length === 0) return [];
+    // Always allow mid-path (Fase 2: /indexers/all bulk-search) to be tried when Fase 1 produces no streams
+    // In fresh=1 mode, mid-path will exclude bludv and strip years for speed
+    const indexerResults = await this.fetchBulkSearchResultsFromIndexers(midPathQueries, {
+      timeoutMs: 8000,
+      excludeIndexers: forceFresh ? new Set(['bludv', 'bludv_xyz']) : undefined,
+      limitQueries: 3,
+      perIndexerLimit: forceFresh ? Math.max(6, TorrentIndexerProvider.FALLBACK_PER_INDEXER_LIMIT || 6) : TorrentIndexerProvider.FALLBACK_PER_INDEXER_LIMIT,
+      excludeNamesWithYear: false,
+    }, context);
 
-    await this.decorateWithDebrid(streams, options);
-    logReq(context, `✅ Retornando ${streams.length} streams finais para '${id}'`);
-    return streams;
+    const midPathStreams = this.collectStreamsFromTorrents(
+      indexerResults,
+      fallbackTitle,
+      context,
+      seen,
+      sourceCounts,
+      150,
+    );
+
+    if (midPathStreams.length === 0) return [];
+
+    if (!forceFresh) {
+      this.warmIndexerCacheInBackground(fallbackTitle, indexerResults, context);
+    }
+
+    await this.decorateWithDebrid(midPathStreams, options);
+    logReq(context, `✅ Retornando ${midPathStreams.length} streams finais para '${id}'`);
+    return midPathStreams;
   }
 
   async getSearchStreams(
@@ -728,6 +748,38 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     return stream.fileIdx !== undefined && stream.fileIdx >= 0
       ? `${base}:${stream.fileIdx}`
       : base;
+  }
+
+  private collectStreamsFromTorrents(
+    torrents: TorrentLike[],
+    fallbackTitle: string,
+    context: MatchContext,
+    seen: Set<string>,
+    sourceCounts: Map<string, number>,
+    maxStreams: number,
+  ): SourceStream[] {
+    const streams: SourceStream[] = [];
+
+    for (const torrent of torrents) {
+      if (!this.isRelevantTorrent(torrent, context)) continue;
+      const stream = this.mapTorrentToStream(torrent, fallbackTitle, context);
+      if (!stream) continue;
+
+      const dedupeKey = this.getDedupeKey(stream);
+      if (dedupeKey && seen.has(dedupeKey)) continue;
+
+      const sourceKey = (stream.source ?? 'unknown').toLowerCase();
+      const sourceCount = sourceCounts.get(sourceKey) ?? 0;
+      if (sourceCount >= 40) continue;
+
+      streams.push(stream);
+      sourceCounts.set(sourceKey, sourceCount + 1);
+      if (dedupeKey) seen.add(dedupeKey);
+
+      if (streams.length >= maxStreams) break;
+    }
+
+    return streams;
   }
 
   private async decorateWithDebrid(
