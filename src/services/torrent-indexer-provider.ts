@@ -635,7 +635,17 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     const uniqueQueries = [...new Set(queries.filter(q => q.trim().length > 0))];
     logReq(context, `🚀 Iniciando busca multi-query (Bulk) para: [${uniqueQueries.join(', ')}]`);
 
-    const rawTorrents = await this.fetchMultiSearchResults(uniqueQueries, !forceFresh, context, forceFresh);
+    // Always allow mid-path (Fase 2: /indexers/all bulk-search) to be tried when Fase 1 is insufficient
+    // In fresh=1 mode, mid-path will exclude bludv and strip years for speed
+    const rawTorrents = await this.fetchMultiSearchResults(uniqueQueries, false, context, forceFresh);
+
+    // If not in fresh=1 mode, warm remaining query candidates in background for slow-path
+    if (!forceFresh && uniqueQueries.length < MAX_TEXT_QUERIES) {
+      const remainingQueries = textQueries.slice(uniqueQueries.length, MAX_TEXT_QUERIES);
+      if (remainingQueries.length > 0) {
+        this.warmRemainingQueriesInBackground(remainingQueries, context);
+      }
+    }
 
     for (const torrent of rawTorrents) {
       if (!this.isRelevantTorrent(torrent, context)) continue;
