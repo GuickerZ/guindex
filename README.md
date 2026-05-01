@@ -133,6 +133,8 @@ Inclui um utilitário `tests/midpatch-timings.mjs` que:
 - Mede tempo total da requisição, tempo até headers, numero de streams retornados e tamanho do payload.
 - Salva um JSON agregando resultados em `test-artifacts/midpatch-timings-<timestamp>.json`.
 
+- Nota: quando executado com `fresh=1` o midfetch aplica heurísticas de desempenho (ex.: pode excluir temporariamente indexers pesados como `bludv` e remover anos dos títulos) para reduzir latência do cold-path. Essas otimizações são aplicadas apenas em `fresh=1` e não alteram o comportamento padrão do slow-path.
+
 Como rodar (local):
 
 ```bash
@@ -343,7 +345,7 @@ npm start
 
 | Variavel | Padrao | Descricao |
 |----------|--------|-----------|
-| `STREMIO_ADDON_SOURCES` | `[{"name":"Mico-Leão Dublado","url":"https://27a5b2bfe3c0-stremio-brazilian-addon.baby-beamup.club"}]` | Lista JSON de addons extras no formato `{name,url}` |
+| `STREMIO_ADDON_SOURCES` | `[]` | Lista JSON de addons extras no formato `[{"name":"Name","url":"https://example.com/manifest.json"}]` (opcional) |
 
 #### Torrent Indexer — busca
 
@@ -353,7 +355,7 @@ npm start
 | `TORRENT_INDEXER_FALLBACK_TIMEOUT_MS` | `12000` | Timeout por request individual ao indexer (ms) |
 | `TORRENT_INDEXER_FALLBACK_CONCURRENCY` | `5` | Quantos indexers consultar em paralelo |
 | `TORRENT_INDEXER_FALLBACK_MAX_INDEXERS` | `0` | Maximo de indexers (0 = todos ativos) |
-| `TORRENT_INDEXER_FALLBACK_PER_INDEXER_LIMIT` | `0` | Limite de resultados por indexer (0 = sem limite) |
+| `TORRENT_INDEXER_FALLBACK_PER_INDEXER_LIMIT` | `0` | Limite de resultados por indexer quando consultando `/indexers/{name}` (0 = sem limite). **OBS**: o endpoint `/indexers/all` não deve receber `limit`; o controle por-indexer é aplicado nas chamadas individuais do slow-path. |
 | `TORRENT_INDEXER_TARGET_STREAMS` | `12` | Quantidade alvo para encerrar cedo com diversidade |
 | `TORRENT_INDEXER_MAX_DYNAMIC_QUERIES` | `10` | Limite de queries dinamicas para melhorar recall |
 | `TORRENT_INDEXER_MAX_STREAMS_PER_SOURCE` | `50` | Maximo de streams por fonte (evita monopolio) |
