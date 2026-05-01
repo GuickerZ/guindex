@@ -582,24 +582,36 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     const textQueries = this.buildTextQueryCandidates(type, parsed, displayTitles, releaseYear, episodeTitle);
 
     const queries: string[] = [];
-    if (imdbQuery) {
-      queries.push(imdbQuery);
-    }
-    if (type.toLowerCase() !== 'movie' && parsed.season !== undefined && targetTitle) {
-      const sPad = String(parsed.season).padStart(2, '0');
-      const eCode = parsed.episode !== undefined
-        ? `E${String(parsed.episode).padStart(2, '0')}` : '';
-      const sCodeQuery = `${targetTitle} S${sPad}${eCode}`;
-      if (!queries.includes(sCodeQuery)) {
-        queries.push(sCodeQuery);
+    if (forceFresh) {
+      // 🚀 Mid Patch: Apenas 3 queries para velocidade máxima no cold-path
+      if (imdbQuery) queries.push(imdbQuery);
+      if (targetTitle) queries.push(targetTitle);
+      
+      const ptTitle = localizedTitles.find(t => t && t !== targetTitle);
+      if (ptTitle) queries.push(ptTitle);
+      
+      logReq(context, `🔍 Modo Mid-Patch ativado (forceFresh). Queries limitadas: ${queries.join(' | ')}`);
+    } else {
+      // Comportamento normal: Busca exaustiva (Fast + Background Slow)
+      if (imdbQuery) {
+        queries.push(imdbQuery);
       }
-    }
-    if (textQuery && !queries.includes(textQuery)) {
-      queries.push(textQuery);
-    }
-    for (const q of textQueries) {
-      if (!queries.includes(q)) {
-        queries.push(q);
+      if (type.toLowerCase() !== 'movie' && parsed.season !== undefined && targetTitle) {
+        const sPad = String(parsed.season).padStart(2, '0');
+        const eCode = parsed.episode !== undefined
+          ? `E${String(parsed.episode).padStart(2, '0')}` : '';
+        const sCodeQuery = `${targetTitle} S${sPad}${eCode}`;
+        if (!queries.includes(sCodeQuery)) {
+          queries.push(sCodeQuery);
+        }
+      }
+      if (textQuery && !queries.includes(textQuery)) {
+        queries.push(textQuery);
+      }
+      for (const q of textQueries) {
+        if (!queries.includes(q)) {
+          queries.push(q);
+        }
       }
     }
 
@@ -631,7 +643,8 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       const query = queries[queryIndex] ?? '';
       if (!query) continue;
 
-      const rawTorrents = await this.fetchSearchResults(query, true, context, forceFresh);
+      // Se for forceFresh, permitimos o "Slow Path" síncrono (fastPathOnly = false)
+      const rawTorrents = await this.fetchSearchResults(query, !forceFresh, context, forceFresh);
       if (rawTorrents.length > 0) {
         logReq(context, `⚡ Cache (Fase 1) retornou ${rawTorrents.length} resultados brutos para '${query}'. Analisando relevância...`);
       }
@@ -3503,6 +3516,11 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     const trimmed = value.trim();
     if (!trimmed) return undefined;
 
+    const numOnly = parseFloat(trimmed);
+    if (!isNaN(numOnly) && !/[a-zA-Z]/.test(trimmed)) {
+      return Math.round(numOnly);
+    }
+
     const match = trimmed.match(/([\d.]+)\s*(TB|GB|MB|KB|B)/i);
     if (!match || !match[1] || !match[2]) return undefined;
 
@@ -3573,30 +3591,57 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
   }
 
   private normalizeTorrentPayload(payload: unknown): TorrentLike[] {
+    let items: TorrentLike[] = [];
     if (!payload) {
-      return [];
+      return items;
     }
 
     if (Array.isArray(payload)) {
-      return payload as TorrentLike[];
-    }
-
-    if (typeof payload === 'object') {
+      items = payload as TorrentLike[];
+    } else if (typeof payload === 'object') {
       const record = payload as Record<string, unknown>;
       const possibleKeys = ['results', 'data', 'items', 'torrents', 'entries'];
       for (const key of possibleKeys) {
         const value = record[key];
         if (Array.isArray(value)) {
-          return value as TorrentLike[];
+          items = value as TorrentLike[];
+          break;
         }
       }
-
-      if (record.torrent) {
-        return [record.torrent as TorrentLike];
+      if (items.length === 0 && record.torrent) {
+        items = [record.torrent as TorrentLike];
       }
     }
 
-    return [];
+    // ── Bypass Adware / Decodificador Base64 (BLUDV) ──
+    for (const item of items) {
+      if (!item) continue;
+      const rec = item as Record<string, unknown>;
+      const url = typeof rec.url === 'string' ? rec.url : (typeof rec.link === 'string' ? rec.link : undefined);
+      const magnet = rec.magnet;
+
+      if (url && !magnet && url.includes('get.php?id=')) {
+        if (/systemads\.org|superadsgo\.xyz|superadsgo1\.xyz|systemads\.xyz|seuvideo\.xyz/.test(url)) {
+          try {
+            const urlObj = new URL(url);
+            let idVal = urlObj.searchParams.get('id');
+            if (idVal) {
+              const reversedId = idVal.split('').reverse().join('');
+              const decoded = Buffer.from(reversedId, 'base64').toString('utf-8');
+              if (decoded.startsWith('magnet:')) {
+                rec.magnet = decoded;
+              } else if (decoded.startsWith('http')) {
+                rec.url = decoded;
+              }
+            }
+          } catch (e) {
+            // Ignorar erro de parse e seguir com o link original
+          }
+        }
+      }
+    }
+
+    return items;
   }
 
   private sanitizeQuery(raw: string | undefined): string | undefined {
