@@ -585,29 +585,34 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     const textQuery = this.buildTextQuery(type, parsed, targetTitle, releaseYear, episodeTitle);
     const textQueries = this.buildTextQueryCandidates(type, parsed, displayTitles, releaseYear, episodeTitle);
 
+    // Sempre construir as 3 queries otimizadas para o mid-path (Fase 2)
+    const midPathQueries: string[] = [];
+    if (imdbQuery) midPathQueries.push(imdbQuery);
+    if (targetTitle) {
+      const titleNoYear = targetTitle.replace(/\s(19|20)\d{2}$/, '').trim();
+      if (titleNoYear) midPathQueries.push(titleNoYear);
+    }
+    
+    const ptTitle = (localizedTitles || []).find(t => t && t !== targetTitle);
+    if (ptTitle) {
+      const ptNoYear = ptTitle.replace(/\s(19|20)\d{2}$/, '').trim();
+      if (ptNoYear && !midPathQueries.includes(ptNoYear)) midPathQueries.push(ptNoYear);
+    }
+
+    // Construir queries completas para Meilisearch (Fase 1) e slow-path (Fase 3)
     const queries: string[] = [];
     if (forceFresh) {
-      if (imdbQuery) queries.push(imdbQuery);
-      if (targetTitle) {
-        const titleNoYear = targetTitle.replace(/\s\d{4}$/, '');
-        queries.push(titleNoYear);
-      }
-      
-      const ptTitle = (localizedTitles || []).find(t => t && t !== targetTitle);
-      if (ptTitle) {
-        const ptNoYear = ptTitle.replace(/\s\d{4}$/, '');
-        queries.push(ptNoYear);
-      }
-      
-      // context not yet built here, use a temporary small context object for logging
-      // the real context is created a few lines later and will be used for subsequent logs
+      // Em fresh=1, usar apenas as queries otimizadas
+      queries.push(...midPathQueries);
       logReq(undefined, `🔍 Modo Mid-Patch (Bulk): Queries otimizadas: ${queries.join(' | ')}`);
     } else {
-      if (imdbQuery) queries.push(imdbQuery);
+      // Em modo normal, começar com queries otimizadas e depois adicionar variações
+      queries.push(...midPathQueries);
       if (type.toLowerCase() !== 'movie' && parsed.season !== undefined && targetTitle) {
         const sPad = String(parsed.season).padStart(2, '0');
         const eCode = parsed.episode !== undefined ? `E${String(parsed.episode).padStart(2, '0')}` : '';
-        queries.push(`${targetTitle} S${sPad}${eCode}`);
+        const epQuery = `${targetTitle} S${sPad}${eCode}`;
+        if (!queries.includes(epQuery)) queries.push(epQuery);
       }
       if (textQuery && !queries.includes(textQuery)) queries.push(textQuery);
       for (const q of textQueries) {
@@ -637,7 +642,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
     // Always allow mid-path (Fase 2: /indexers/all bulk-search) to be tried when Fase 1 is insufficient
     // In fresh=1 mode, mid-path will exclude bludv and strip years for speed
-    const rawTorrents = await this.fetchMultiSearchResults(uniqueQueries, false, context, forceFresh);
+    const rawTorrents = await this.fetchMultiSearchResults(uniqueQueries, false, context, forceFresh, midPathQueries);
 
     // If not in fresh=1 mode, warm remaining query candidates in background for slow-path
     if (!forceFresh && uniqueQueries.length < MAX_TEXT_QUERIES) {
@@ -1069,7 +1074,8 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     queries: string[],
     fastPathOnly = false,
     context: MatchContext,
-    forceFresh = false
+    forceFresh = false,
+    midPathQueries?: string[]
   ): Promise<TorrentLike[]> {
     if (!queries || queries.length === 0) return [];
 
@@ -1093,13 +1099,15 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     }
 
     // 2) Fase 2: Mid-Path (Sync Scrape via /indexers/all)
-    // Se for forceFresh, o timeout é menor, excluímos o Bludv e também removemos anos dos titles para ganhar velocidade
-    const indexerResults = await this.fetchBulkSearchResultsFromIndexers(queries, {
-      timeoutMs: forceFresh ? 12000 : 25000,
+    // Sempre usar as 3 queries otimizadas (IMDB ID, titulo inglês sem ano, titulo português sem ano)
+    // Timeout reduzido para ~8s que é mais adequado para Stremio
+    const queriesToUse = midPathQueries && midPathQueries.length > 0 ? midPathQueries : queries.slice(0, 3);
+    const indexerResults = await this.fetchBulkSearchResultsFromIndexers(queriesToUse, {
+      timeoutMs: forceFresh ? 8000 : 8000,
       excludeIndexers: forceFresh ? new Set(['bludv', 'bludv_xyz']) : undefined,
-      limitQueries: forceFresh ? 2 : 3,
+      limitQueries: 3,
       perIndexerLimit: forceFresh ? Math.max(6, TorrentIndexerProvider.FALLBACK_PER_INDEXER_LIMIT || 6) : TorrentIndexerProvider.FALLBACK_PER_INDEXER_LIMIT,
-      excludeNamesWithYear: forceFresh ? true : false,
+      excludeNamesWithYear: false,
     }, context);
 
     const merged = this.rankTorrentsByQuery(
