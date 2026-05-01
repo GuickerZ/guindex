@@ -588,10 +588,10 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     // Sempre construir as 3 queries otimizadas para o mid-path (Fase 2)
     const midPathQueries: string[] = [];
     if (imdbQuery) midPathQueries.push(imdbQuery);
-    if (targetTitle) midPathQueries.push(targetTitle.replace(/\s(19|20)\d{2}$/, '').trim());
+    if (targetTitle) midPathQueries.push(targetTitle);
     
     const ptTitle = (localizedTitles || []).find(t => t && t !== targetTitle);
-    if (ptTitle) midPathQueries.push(ptTitle.replace(/\s(19|20)\d{2}$/, '').trim());
+    if (ptTitle) midPathQueries.push(ptTitle);
 
     // Construir queries completas para Meilisearch (Fase 1) e slow-path (Fase 3)
     const queries: string[] = [];
