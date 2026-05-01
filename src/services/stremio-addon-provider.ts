@@ -30,8 +30,13 @@ const LANGUAGE_ALIASES: Record<string, string> = {
   portuguese: 'Portuguese',
   portugues: 'Portuguese',
   'pt-br': 'Portuguese',
+  'pt br': 'Portuguese',
   ptbr: 'Portuguese',
   brazilian: 'Portuguese',
+  dublado: 'Portuguese',
+  dublada: 'Portuguese',
+  nacional: 'Portuguese',
+  'audio nacional': 'Portuguese',
   english: 'English',
   ingles: 'English',
   eng: 'English',
@@ -486,6 +491,8 @@ function pickLanguages(existing: string[] | undefined, lines: string[]): string[
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase();
+  const tokenized = normalized.replace(/[^a-z0-9]+/g, ' ').trim();
+  const sawDualAudio = /\bdual\s*audio\b|\bmulti\s*audio\b/i.test(tokenized);
 
   for (const [alias, canonical] of Object.entries(LANGUAGE_ALIASES)) {
     const pattern = new RegExp(`\\b${escapeRegex(alias)}\\b`, 'i');
@@ -497,6 +504,15 @@ function pickLanguages(existing: string[] | undefined, lines: string[]): string[
   for (const [flag, language] of Object.entries(FLAG_LANGUAGE_MAP)) {
     if (combined.includes(flag)) {
       languages.add(language);
+    }
+  }
+
+  if (sawDualAudio) {
+    if (!languages.has('English')) {
+      languages.add('English');
+    }
+    if (!languages.has('Portuguese')) {
+      languages.add('Portuguese');
     }
   }
 

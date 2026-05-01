@@ -352,19 +352,17 @@ export class StreamService {
   }
 
   private static detectLanguages(stream: SourceStream): string[] {
-    const fromSource = Array.isArray(stream.languages) ? stream.languages : [];
+    const fromSource = Array.isArray(stream.languages)
+      ? StreamService.normalizeLanguages(stream.languages)
+      : [];
 
-    // If the source provider (e.g. torrent-indexer) already returned languages,
-    // use those as the primary source and don't re-detect from text to avoid duplication.
-    if (fromSource.length > 0) {
-      return StreamService.normalizeLanguages(fromSource);
-    }
-
-    // Only detect from text when no languages were provided by the source
-    const text = `${stream.fileName ?? ''} ${stream.title ?? ''} ${stream.contextString ?? ''} ${stream.name ?? ''}`.toLowerCase();
+    // Always inspect textual context to complement source-provided tags.
+    // Some providers mark dual audio inconsistently and may return English-only.
+    const contextText = StreamService.buildContextText(stream);
+    const text = `${stream.fileName ?? ''} ${stream.title ?? ''} ${stream.contextString ?? ''} ${stream.description ?? ''} ${stream.name ?? ''} ${contextText}`.toLowerCase();
     const normalizedText = StreamService.normalizeLanguageKey(text);
 
-    const detected: string[] = [];
+    const detected: string[] = [...fromSource];
     if (/\b(pt[\s\.\-_]?br|brazilian|dublado|dublada|portuguese|portugues|ptbr)\b/.test(normalizedText)) {
       detected.push('Portuguese');
     }
@@ -411,9 +409,17 @@ export class StreamService {
       detected.push('Ukrainian');
     }
 
-    // Many releases tag "Dual Audio" without listing the second language explicitly.
-    if (/\bdual\s*audio\b/.test(normalizedText) && detected.includes('Portuguese') && !detected.includes('English')) {
-      detected.push('English');
+    // Many BR releases tag "Dual Audio" without complete language fields.
+    if (/\bdual\s*audio\b/.test(normalizedText)) {
+      if (!detected.includes('English')) {
+        detected.push('English');
+      }
+      if (
+        !detected.includes('Portuguese') &&
+        /\b(dublado|dublada|nacional|pt[\s.\-_]?br|ptbr|portuguese|portugues)\b/.test(normalizedText)
+      ) {
+        detected.push('Portuguese');
+      }
     }
 
     return StreamService.normalizeLanguages(detected);
@@ -464,7 +470,8 @@ export class StreamService {
 
   private static appendMetadataToFilename(filename: string, stream: SourceStream): string {
     let newName = filename;
-    const text = `${stream.contextString ?? ''} ${stream.title ?? ''} ${stream.name ?? ''}`;
+    const contextText = StreamService.buildContextText(stream);
+    const text = `${stream.contextString ?? ''} ${stream.description ?? ''} ${stream.title ?? ''} ${stream.name ?? ''} ${contextText}`;
     if (!text.trim()) return filename;
 
     const extra: string[] = [];
@@ -516,6 +523,26 @@ export class StreamService {
     }
 
     return newName;
+  }
+
+  private static buildContextText(stream: SourceStream): string {
+    const context = stream.context;
+    if (!context) {
+      return '';
+    }
+
+    const chunks: string[] = [];
+    if (context.title) chunks.push(context.title);
+    if (context.episodeTitle) chunks.push(context.episodeTitle);
+    if (context.type) chunks.push(context.type);
+    if (typeof context.year === 'number') chunks.push(String(context.year));
+    if (typeof context.season === 'number') chunks.push(`season ${context.season}`);
+    if (typeof context.episode === 'number') chunks.push(`episode ${context.episode}`);
+    if (Array.isArray(context.episodeList) && context.episodeList.length > 0) {
+      chunks.push(context.episodeList.map((value) => String(value)).join(' '));
+    }
+
+    return chunks.join(' ');
   }
 
   private static extractInfoHash(stream: SourceStream): string | undefined {

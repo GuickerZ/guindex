@@ -131,6 +131,9 @@ export function setupRoutes() {
       if (debridSelection.torboxToken) {
         extra.torboxToken = debridSelection.torboxToken;
       }
+      if (query?.fresh === '1' || query?.fresh === 'true' || query?.fresh === true) {
+        (extra as { forceFresh?: boolean }).forceFresh = true;
+      }
 
       const result = await streamController.handleStreamRequest({ type, id, extra });
       reply.send(result);
@@ -157,12 +160,17 @@ export function setupRoutes() {
         torboxToken?: string; 
         debridProvider?: string;
         token?: string;
+        forceFresh?: boolean;
       } = {
         debridProvider: debridSelection.provider,
         token: debridSelection.token,
         torboxToken: debridSelection.torboxToken,
         realdebridToken: debridSelection.realdebridToken
       };
+
+      if (query?.fresh === '1' || query?.fresh === 'true' || query?.fresh === true) {
+        extra.forceFresh = true;
+      }
 
       const result = await streamController.handleStreamRequest({ type, id, extra });
       reply.send(result);
@@ -189,12 +197,17 @@ export function setupRoutes() {
         torboxToken?: string; 
         debridProvider?: string;
         token?: string;
+        forceFresh?: boolean;
       } = {
         debridProvider: debridSelection.provider,
         token: debridSelection.token,
         torboxToken: debridSelection.torboxToken,
         realdebridToken: debridSelection.realdebridToken
       };
+
+      if (query?.fresh === '1' || query?.fresh === 'true' || query?.fresh === true) {
+        extra.forceFresh = true;
+      }
 
       const result = await streamController.handleStreamRequest({ type, id, extra });
       reply.send(result);

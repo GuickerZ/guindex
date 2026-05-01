@@ -9,6 +9,7 @@
     "start": "node dist/server.js",
     "lint": "eslint src --ext .ts",
     "test:real-flow": "npm run build && node --test tests/stremio-real-flow.test.mjs",
+    "test:midpatch": "npm run build && node tests/midpatch-timings.mjs",
     "populate:latest": "npx ts-node --esm src/scripts/fetch-latest.ts",
     "populate:tmdb": "npx ts-node --esm src/scripts/populate-tmdb.ts",
     "populate:tmdb:all": "npx ts-node --esm src/scripts/populate-tmdb.ts --all"

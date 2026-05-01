@@ -8,6 +8,7 @@ export interface SourceFetchOptions {
   debridProvider?: 'realdebrid' | 'torbox';
   realdebridToken?: string;
   torboxToken?: string;
+  forceFresh?: boolean;
 }
 
 export abstract class BaseSourceProvider {

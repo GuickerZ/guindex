@@ -14,13 +14,13 @@ export class ConfigService {
     const normalizedBaseUrl =
       ConfigService.normalizeBaseUrl(process.env.BASE_URL) ||
       ConfigService.normalizeBaseUrl(process.env.VERCEL_PROJECT_PRODUCTION_URL) ||
-      (process.env.VERCEL_ENV === 'production' ? 'https://guindex-stremio.vercel.app' : ConfigService.normalizeBaseUrl(process.env.VERCEL_URL)) ||
+      ConfigService.normalizeBaseUrl(process.env.VERCEL_URL) ||
       ConfigService.normalizeBaseUrl(process.env.RENDER_EXTERNAL_URL) ||
       ConfigService.normalizeBaseUrl(`http://localhost:${port}`)!;
 
     const waitVideoUrl =
       ConfigService.normalizeBaseUrl(process.env.TORBOX_WAIT_VIDEO_URL) ||
-      ConfigService.normalizeBaseUrl('https://aiostreams.elfhosted.com/static/downloading.mp4');
+      `${normalizedBaseUrl}/placeholder/downloading.mp4`;
 
     const torboxStreamLimit =
       Number(process.env.TORBOX_STREAM_LIMIT) && Number(process.env.TORBOX_STREAM_LIMIT) > 0

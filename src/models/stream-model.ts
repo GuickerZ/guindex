@@ -43,5 +43,6 @@ export interface StreamRequest {
     realdebridToken?: string;
     torboxToken?: string;
     token?: string;
+    forceFresh?: boolean;
   };
 }

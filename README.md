@@ -112,7 +112,39 @@ Stremio/AIOStreams
 
 > Os indexers que nao suportam IMDB recebem queries com titulo textual (EN e PT-BR) em vez de `ttXXXXXXX`. A resolucao PT-BR via TMDB e essencial para maximizar hits nesses indexers.
 
+> Fontes extras de addon podem ser adicionadas via `STREMIO_ADDON_SOURCES` em JSON, sem alterar o código. Se `STREMIO_ISSUER` e `STREMIO_SIGNATURE` forem definidos, o manifesto expõe essa assinatura; caso contrario, o addon continua funcionando sem esse bloco.
+
 ---
+
+## Como funciona hoje (resumo atualizado)
+
+- O servidor expõe endpoints Stremio compatíveis: `/manifest.json` e `/stream/:type/:id.json`.
+- O fluxo prioriza um fast-path de cache (`/search` no torrent-indexer) e recorre ao slow-path (`/indexers/{name}`) apenas quando necessário.
+- Metadados são resolvidos via Cinemeta e enriquecidos com títulos localizados do TMDB (quando disponível) para melhorar recall em indexers BR.
+- A inferência de idioma combina campos estruturados (`stream.context`), `description`, `fileName` e `title` para detectar corretamente `Dual Audio` e marcar `Portuguese + English` quando apropriado.
+- Restrições e timeouts são configuráveis via variaveis de ambiente (ver seção Configuracao). O comportamento padrão tenta retornar resultados rápidos mas continua warming em background para popular o cache.
+
+## Testes de tempo (midpatch)
+
+Inclui um utilitário `tests/midpatch-timings.mjs` que:
+
+- Verifica se o servidor local está ativo (`/health`) e inicia `dist/server.js` se necessario.
+- Faz requisições ao endpoint `/stream/:type/:id.json` para uma lista de filmes e series (configuravel) com query param `?_nocache=timestamp` para evitar respostas em cache.
+- Mede tempo total da requisição, tempo até headers, numero de streams retornados e tamanho do payload.
+- Salva um JSON agregando resultados em `test-artifacts/midpatch-timings-<timestamp>.json`.
+
+Como rodar (local):
+
+```bash
+# construa o projeto
+npm run build
+
+# execute o script de timing (vai iniciar o servidor se necessario)
+npm run test:midpatch
+```
+
+Ao terminar, confira `test-artifacts/` para o arquivo de resultados. Use a variavel de ambiente `MIDPATCH_IDS` para passar uma lista CSV de IDs (ex: `MIDPATCH_IDS="tt0111161:movie,tt0903747:series" npm run test:midpatch`).
+O teste chama o endpoint com `fresh=1` para ignorar caches locais e usa `MIDPATCH_MAX_MS` para falhar quando o retorno frio demora mais que o budget esperado (padrao: `15000`).
 
 ## Torrent Indexer
 
@@ -304,8 +336,14 @@ npm start
 
 | Variavel | Padrao | Descricao |
 |----------|--------|-----------|
-| `TORRENT_INDEXER_URL` | `http://guindex.duckdns.org:8090` | URL do torrent-indexer self-hosted |
+| `TORRENT_INDEXER_URL` | `http://127.0.0.1:8090` | URL do torrent-indexer local (sobrescreva em deploy) |
 | `TORRENT_INDEXER_ENABLE_FALLBACK` | `true` | Ativa scraping live nos `/indexers/{nome}` alem do cache `/search` |
+
+#### Fontes de addon (opcional)
+
+| Variavel | Padrao | Descricao |
+|----------|--------|-----------|
+| `STREMIO_ADDON_SOURCES` | `[{"name":"Mico-Leão Dublado","url":"https://27a5b2bfe3c0-stremio-brazilian-addon.baby-beamup.club"}]` | Lista JSON de addons extras no formato `{name,url}` |
 
 #### Torrent Indexer — busca
 
@@ -331,7 +369,7 @@ npm start
 
 | Variavel | Padrao | Descricao |
 |----------|--------|-----------|
-| `TORRENT_INDEXER_DISABLED_INDEXERS` | `comando_torrents` | Lista CSV de indexers desativados |
+| `TORRENT_INDEXER_DISABLED_INDEXERS` | — | Lista CSV de indexers desativados |
 | `TORRENT_INDEXER_FAILURE_THRESHOLD` | `2` | Falhas consecutivas antes de cooldown |
 | `TORRENT_INDEXER_FAILURE_COOLDOWN_MS` | `900000` | Tempo de cooldown apos falhas (15min) |
 
@@ -371,7 +409,10 @@ npm start
 
 ```bash
 # Conexao (aponte para sua instancia self-hosted)
-TORRENT_INDEXER_URL=http://SEU_IP:8090
+TORRENT_INDEXER_URL=http://127.0.0.1:8090
+
+# Exemplo para sua VPS/DigitalOcean
+# TORRENT_INDEXER_URL=http://guindex.duckdns.org:8090
 
 # Busca e fallback
 TORRENT_INDEXER_ENABLE_FALLBACK=true
@@ -391,7 +432,7 @@ TORRENT_INDEXER_HYBRID_MIN_RESULTS=2
 TORRENT_INDEXER_HYBRID_MIN_INDEXERS=2
 
 # Estabilidade e Resiliência
-TORRENT_INDEXER_DISABLED_INDEXERS=comando_torrents,bludv,filme_torrent
+TORRENT_INDEXER_DISABLED_INDEXERS=
 TORRENT_INDEXER_FAILURE_THRESHOLD=2
 TORRENT_INDEXER_FAILURE_COOLDOWN_MS=900000
 
@@ -426,14 +467,10 @@ O arquivo `aiostreams-config-exemplo.json` contem uma configuracao de referencia
 
 ## Addons Externos
 
-O GuIndex agrega streams de **outros addons Stremio** que nao possuem suporte nativo a debrid. Configure em `src/config/sources.ts`:
+O GuIndex agrega streams de **outros addons Stremio** que nao possuem suporte nativo a debrid. As fontes extras sao configuradas via `STREMIO_ADDON_SOURCES` em JSON. Se a variavel nao estiver definida, o addon usa o default `Mico-Leão Dublado`.
 
-```typescript
-export const SOURCES: BaseSourceProvider[] = [
-  new TorrentIndexerProvider('GuIndex', TORRENT_INDEXER_BASE_URL),
-  new StremioAddonProvider('Mico-Leão Dublado', 'https://url-do-addon.com'),
-  // Adicione quantos quiser
-];
+```bash
+STREMIO_ADDON_SOURCES='[{"name":"Addon BR 1","url":"https://addon1.com"},{"name":"Addon BR 2","url":"https://addon2.com"}]'
 ```
 
 Magnets de qualquer addon passam pelo seu debrid automaticamente.

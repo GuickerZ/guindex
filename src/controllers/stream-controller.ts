@@ -34,13 +34,17 @@ export class StreamController {
       });
       const selectedProvider = debridSelection.provider;
       const selectedToken = debridSelection.token;
+      const forceFresh = extra?.forceFresh === true;
       const fetchOptions = selectedToken
         ? {
             debridProvider: selectedProvider,
             realdebridToken: selectedProvider === 'realdebrid' ? selectedToken : undefined,
-            torboxToken: selectedProvider === 'torbox' ? selectedToken : undefined
+            torboxToken: selectedProvider === 'torbox' ? selectedToken : undefined,
+            forceFresh
           }
-        : undefined;
+        : forceFresh
+          ? { forceFresh }
+          : undefined;
       const sourceStreams = await SourceService.fetchStreamsFromAllSources(type, id, fetchOptions);
       
       // Split streams by transport type
