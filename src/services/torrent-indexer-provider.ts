@@ -3088,6 +3088,11 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     stream.contextString = (torrent as any).context.trim();
   }
 
+  const similarity = this.toNumber((torrent as Record<string, unknown>).similarity);
+  if (similarity !== undefined && similarity > 0) {
+    stream.similarity = similarity;
+  }
+
   return stream;
 }
 
