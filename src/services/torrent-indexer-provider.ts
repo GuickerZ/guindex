@@ -180,10 +180,10 @@ const readEnv = (primary: string, legacy?: string): string | undefined => {
   return undefined;
 };
 
-const MAX_STREAMS = 120;
+const MAX_STREAMS = 240;
 const TARGET_STREAMS_PER_REQUEST = parsePositiveInt(
   process.env.TORRENT_INDEXER_TARGET_STREAMS,
-  12,
+  30,
 );
 const MAX_DYNAMIC_QUERIES = parsePositiveInt(
   process.env.TORRENT_INDEXER_MAX_DYNAMIC_QUERIES,
@@ -677,10 +677,35 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       150,
     );
 
-    if (midPathStreams.length === 0) return [];
+    if (midPathStreams.length === 0) {
+      if (forceFresh) {
+        const broadQueries = [...new Set([...midPathQueries, ...textQueries].filter(q => q.trim().length > 0))];
+        if (broadQueries.length > midPathQueries.length) {
+          logReq(context, `🔁 Fresh path vazio; tentando fallback amplo com ${broadQueries.length} queries.`);
+          const fallbackResults = await this.fetchMultiSearchResults(broadQueries, false, context, true);
+          const fallbackStreams = this.collectStreamsFromTorrents(
+            fallbackResults,
+            fallbackTitle,
+            context,
+            seen,
+            sourceCounts,
+            150,
+          );
 
-    if (!forceFresh) {
-      this.warmIndexerCacheInBackground(fallbackTitle, indexerResults, context);
+          if (fallbackStreams.length > 0) {
+            await this.decorateWithDebrid(fallbackStreams, options);
+            logReq(context, `✅ Fallback amplo retornou ${fallbackStreams.length} streams finais para '${id}'`);
+            return fallbackStreams;
+          }
+        }
+      }
+
+      // If mid-path returned nothing, enqueue a slow-path background job
+      // to try a live scrape across indexers so we can warm caches later.
+      if (!forceFresh) {
+        this.warmIndexerCacheInBackground(fallbackTitle, indexerResults, context);
+      }
+      return [];
     }
 
     await this.decorateWithDebrid(midPathStreams, options);
@@ -743,6 +768,25 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     return stream.fileIdx !== undefined && stream.fileIdx >= 0
       ? `${base}:${stream.fileIdx}`
       : base;
+  }
+
+  private getTorrentDedupKey(torrent: TorrentLike): string | undefined {
+    const infoHash = this.toString(torrent.info_hash ?? torrent.infoHash ?? torrent.hash);
+    if (infoHash) {
+      return infoHash.toLowerCase();
+    }
+
+    const magnet = this.toString(torrent.magnet_link ?? torrent.magnet);
+    if (magnet) {
+      const hash = this.extractInfoHash(magnet);
+      if (hash) {
+        return hash.toLowerCase();
+      }
+      return magnet;
+    }
+
+    const title = this.toString(torrent.title ?? torrent.original_title ?? torrent.details);
+    return title ? title.toLowerCase() : undefined;
   }
 
   private collectStreamsFromTorrents(
@@ -1223,30 +1267,102 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
         .sort((a, b) => this.compareIndexerPriority(a, b))
         .slice(0, 4);
 
-      if (selected.length === 0) {
+      const fallbackCandidates = selected.length > 0
+        ? selected
+        : indexers
+            .filter((name) => !this.shouldSkipIndexer(name))
+            .sort((a, b) => this.compareIndexerPriority(a, b))
+            .slice(0, 6);
+
+      if (fallbackCandidates.length === 0) {
         return [];
       }
 
       const indexersList = selected.join(',');
-      logReq(context, `🐢 Bulk-Search: Buscando [${topQueries.join(', ')}] em [${indexersList}] (Timeout: ${timeout}ms)`);
+      logReq(context, `🐢 Bulk-Search: Buscando [${topQueries.join(', ')}] em [${indexersList || fallbackCandidates.join(',')}] (Timeout: ${timeout}ms)`);
 
       const url = new URL(`${this.baseUrl}/indexers`);
       for (const q of topQueries) {
         url.searchParams.append('q', q);
       }
-      url.searchParams.set('indexers', indexersList);
+      url.searchParams.set('indexers', indexersList || fallbackCandidates.join(','));
 
       const response = await request(url.toString(), {
         signal: AbortSignal.timeout(timeout),
         headers: { Accept: 'application/json' },
       });
-      if (response.statusCode >= 400) return [];
-      const payload = await response.body.json();
-      return this.normalizeTorrentPayload(payload);
+      if (response.statusCode < 400) {
+        const payload = await response.body.json();
+        const normalized = this.normalizeTorrentPayload(payload);
+        if (normalized.length > 0) {
+          return normalized;
+        }
+      }
+
+      logReq(context, `⚠️ Bulk-Search vazio/instável; usando fallback por indexer em ${fallbackCandidates.length} providers.`);
+      return await this.fetchSearchResultsFromCandidates(topQueries, fallbackCandidates, context);
     } catch (err) {
       logReq(context, `❌ Erro no bulk: ${err instanceof Error ? err.message : String(err)}`);
-      return [];
+      const indexers = await this.fetchIndexerNames();
+      const fallbackCandidates = indexers
+        .filter((name) => !this.shouldSkipIndexer(name))
+        .sort((a, b) => this.compareIndexerPriority(a, b))
+        .slice(0, 6);
+      if (fallbackCandidates.length === 0) {
+        return [];
+      }
+      logReq(context, `↩️ Fallback emergencial por indexer em ${fallbackCandidates.length} providers.`);
+      return await this.fetchSearchResultsFromCandidates(topQueries, fallbackCandidates, context);
     }
+  }
+
+  private async fetchSearchResultsFromCandidates(
+    queries: string[],
+    indexers: string[],
+    context?: MatchContext,
+  ): Promise<TorrentLike[]> {
+    const merged: TorrentLike[] = [];
+    const seen = new Set<string>();
+
+    for (const query of queries) {
+      for (let i = 0; i < indexers.length; i += TorrentIndexerProvider.FALLBACK_INDEXER_CONCURRENCY) {
+        const batch = indexers.slice(i, i + TorrentIndexerProvider.FALLBACK_INDEXER_CONCURRENCY);
+        const settled = await Promise.allSettled(
+          batch.map((name) => this.fetchSingleIndexerSearch(name, query)),
+        );
+
+        for (const item of settled) {
+          if (item.status !== 'fulfilled' || item.value.length === 0) {
+            continue;
+          }
+
+          for (const torrent of item.value) {
+            const key = this.getTorrentDedupKey(torrent);
+            if (key && seen.has(key)) {
+              continue;
+            }
+            merged.push(torrent);
+            if (key) {
+              seen.add(key);
+            }
+          }
+        }
+
+        if (merged.length >= MAX_STREAMS) {
+          break;
+        }
+      }
+
+      if (merged.length >= MAX_STREAMS) {
+        break;
+      }
+    }
+
+    if (merged.length > 0) {
+      logReq(context, `✅ Fallback por indexer recuperou ${merged.length} torrents brutos.`);
+    }
+
+    return this.rankTorrentsByQuery(merged, queries[0] ?? '');
   }
 
 
@@ -2970,6 +3086,11 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
   }
   if (typeof (torrent as any).context === 'string' && (torrent as any).context.trim()) {
     stream.contextString = (torrent as any).context.trim();
+  }
+
+  const similarity = this.toNumber((torrent as Record<string, unknown>).similarity);
+  if (similarity !== undefined && similarity > 0) {
+    stream.similarity = similarity;
   }
 
   return stream;
