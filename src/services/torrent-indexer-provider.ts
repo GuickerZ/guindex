@@ -596,11 +596,9 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     // Construir queries completas para Meilisearch (Fase 1) e slow-path (Fase 3)
     const queries: string[] = [];
     if (forceFresh) {
-      // Em fresh=1, usar apenas as queries otimizadas
       queries.push(...midPathQueries);
       logReq(undefined, `🔍 Modo Mid-Patch (Bulk): Queries otimizadas: ${queries.join(' | ')}`);
     } else {
-      // Em modo normal, começar com queries otimizadas e depois adicionar variações
       queries.push(...midPathQueries);
       if (type.toLowerCase() !== 'movie' && parsed.season !== undefined && targetTitle) {
         const sPad = String(parsed.season).padStart(2, '0');
@@ -628,13 +626,16 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     };
 
     const seen = new Set<string>();
-    const streams: SourceStream[] = [];
     const sourceCounts = new Map<string, number>();
 
     const uniqueQueries = [...new Set(queries.filter(q => q.trim().length > 0))];
     logReq(context, `🚀 Iniciando busca multi-query (Bulk) para: [${uniqueQueries.join(', ')}]`);
 
     const fallbackTitle = targetTitle || queries[0] || id;
+
+    // ═══════════════════════════════════════════════════════
+    // FASE 1 — Fast Path: Meilisearch (cache local)
+    // ═══════════════════════════════════════════════════════
     const fastPathTorrents = await this.fetchBulkMeilisearchResults(uniqueQueries);
     const fastPathStreams = this.collectStreamsFromTorrents(
       fastPathTorrents,
@@ -645,7 +646,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       150,
     );
 
-    // If not in fresh=1 mode, warm remaining query candidates in background for slow-path
+    // Warm remaining queries in background (slow-path)
     if (!forceFresh && uniqueQueries.length < MAX_TEXT_QUERIES) {
       const remainingQueries = textQueries.slice(uniqueQueries.length, MAX_TEXT_QUERIES);
       if (remainingQueries.length > 0) {
@@ -657,19 +658,23 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       if (!forceFresh) {
         this.warmIndexerCacheInBackground(fallbackTitle, fastPathTorrents, context);
       }
-
       await this.decorateWithDebrid(fastPathStreams, options);
-      logReq(context, `✅ Retornando ${fastPathStreams.length} streams finais para '${id}'`);
+      logReq(context, `✅ [Fast-Path] Retornando ${fastPathStreams.length} streams para '${id}'`);
       return fastPathStreams;
     }
 
-    // Always allow mid-path (Fase 2: bulk-search via indexers rápidos) to be tried when Fase 1 produces no streams
-    const indexerResults = await this.fetchBulkSearchResultsFromIndexers(midPathQueries, {
-      timeoutMs: 8000,
+    // ═══════════════════════════════════════════════════════
+    // FASE 2 — Mid Path: Live scrape com deadline global
+    //   Usa Promise.race com um timer para garantir que
+    //   retornamos resultados parciais dentro do deadline
+    // ═══════════════════════════════════════════════════════
+    logReq(context, `⏳ [Mid-Path] Fast-path vazio. Iniciando live scrape...`);
+    const midPathResults = await this.fetchBulkSearchResultsFromIndexers(midPathQueries, {
+      timeoutMs: 10_000,
     }, context);
 
     const midPathStreams = this.collectStreamsFromTorrents(
-      indexerResults,
+      midPathResults,
       fallbackTitle,
       context,
       seen,
@@ -677,40 +682,43 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       150,
     );
 
-    if (midPathStreams.length === 0) {
-      if (forceFresh) {
-        const broadQueries = [...new Set([...midPathQueries, ...textQueries].filter(q => q.trim().length > 0))];
-        if (broadQueries.length > midPathQueries.length) {
-          logReq(context, `🔁 Fresh path vazio; tentando fallback amplo com ${broadQueries.length} queries.`);
-          const fallbackResults = await this.fetchMultiSearchResults(broadQueries, false, context, true);
-          const fallbackStreams = this.collectStreamsFromTorrents(
-            fallbackResults,
-            fallbackTitle,
-            context,
-            seen,
-            sourceCounts,
-            150,
-          );
-
-          if (fallbackStreams.length > 0) {
-            await this.decorateWithDebrid(fallbackStreams, options);
-            logReq(context, `✅ Fallback amplo retornou ${fallbackStreams.length} streams finais para '${id}'`);
-            return fallbackStreams;
-          }
-        }
-      }
-
-      // If mid-path returned nothing, enqueue a slow-path background job
-      // to try a live scrape across indexers so we can warm caches later.
-      if (!forceFresh) {
-        this.warmIndexerCacheInBackground(fallbackTitle, indexerResults, context);
-      }
-      return [];
+    if (midPathStreams.length > 0) {
+      await this.decorateWithDebrid(midPathStreams, options);
+      logReq(context, `✅ [Mid-Path] Retornando ${midPathStreams.length} streams para '${id}'`);
+      return midPathStreams;
     }
 
-    await this.decorateWithDebrid(midPathStreams, options);
-    logReq(context, `✅ Retornando ${midPathStreams.length} streams finais para '${id}'`);
-    return midPathStreams;
+    // ═══════════════════════════════════════════════════════
+    // FASE 2.5 — Fallback: Se mid-path falhou, tenta busca
+    //   síncrona ampla com todas as queries antes de desistir
+    // ═══════════════════════════════════════════════════════
+    const broadQueries = [...new Set([...midPathQueries, ...textQueries].filter(q => q.trim().length > 0))];
+    if (broadQueries.length > midPathQueries.length) {
+      logReq(context, `🔁 [Fallback] Mid-path vazio; tentando busca ampla com ${broadQueries.length} queries.`);
+      const fallbackResults = await this.fetchMultiSearchResults(broadQueries, false, context, forceFresh);
+      const fallbackStreams = this.collectStreamsFromTorrents(
+        fallbackResults,
+        fallbackTitle,
+        context,
+        seen,
+        sourceCounts,
+        150,
+      );
+
+      if (fallbackStreams.length > 0) {
+        await this.decorateWithDebrid(fallbackStreams, options);
+        logReq(context, `✅ [Fallback] Retornando ${fallbackStreams.length} streams para '${id}'`);
+        return fallbackStreams;
+      }
+    }
+
+    // Warm cache in background for next request
+    if (!forceFresh) {
+      this.warmIndexerCacheInBackground(fallbackTitle, midPathResults, context);
+    }
+
+    logReq(context, `⚠️ Nenhum resultado encontrado para '${id}' após todas as fases.`);
+    return [];
   }
 
   async getSearchStreams(
@@ -986,6 +994,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
   private async fetchMeilisearchResults(query: string): Promise<TorrentLike[]> {
     const url = new URL(`${this.baseUrl}/search`);
     url.searchParams.set('q', query);
+    url.searchParams.set('limit', '200');
     try {
       const response = await request(url.toString(), {
         signal: AbortSignal.timeout(5_000),
@@ -1211,6 +1220,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     for (const q of uniqueQueries) {
       url.searchParams.append('q', q);
     }
+    url.searchParams.set('limit', '200');
 
     try {
       const response = await request(url.toString(), {
