@@ -30,7 +30,6 @@ export interface SourceStream {
   quality?: string;
   releaseGroup?: string;
   context?: StreamContext;
-  similarity?: number;
   
   // Extended Metadata from Torrent Indexer API
   videoQuality?: string;
