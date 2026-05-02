@@ -941,55 +941,7 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
       }
     }
   }
-  
 
-  private async fetchSearchResults(
-    query: string,
-    fastPathOnly = false,
-    context: MatchContext,
-    forceFresh = false,
-  ): Promise<TorrentLike[]> {
-    const cacheKey = this.getSearchCacheKey(query);
-    const cached = forceFresh ? undefined : TorrentIndexerProvider.searchCache.get(cacheKey);
-    if (cached && Date.now() - cached.ts < TorrentIndexerProvider.SEARCH_CACHE_TTL_MS) {
-      return cached.data;
-    }
-
-    const searchResults = await this.fetchMeilisearchResults(query);
-
-    if (fastPathOnly || this.hasSufficientResults(searchResults, query, context)) {
-      if (!fastPathOnly) {
-        const ranked = this.rankTorrentsByQuery(searchResults, query);
-        if (!forceFresh) {
-          TorrentIndexerProvider.searchCache.set(cacheKey, { ts: Date.now(), data: ranked });
-          this.warmIndexerCacheInBackground(query, ranked, context);
-        }
-        
-        return ranked;
-      }
-      return searchResults;
-    }
-
-    const uniqueQueries = [...new Set([query, ...this.buildSearchRetryQueries(query)].filter(q => q.trim().length > 0))];
-    logReq(context, `🚀 Iniciando busca multi-query para: [${uniqueQueries.join(', ')}]`);
-
-    // ✅ Uso da arquitetura 3-tiers: Fast (Cache), Mid (Sync Scrape) e Slow (Background Scrape)
-    const rawTorrents = await this.fetchMultiSearchResults(uniqueQueries, !forceFresh, context);
-
-    if (rawTorrents.length > 0) {
-      logReq(context, `⚡ Resultados brutos obtidos: ${rawTorrents.length}. Analisando relevância...`);
-    }
-
-    const ranked = this.rankTorrentsByQuery(
-      this.mergeTorrentResults(searchResults, rawTorrents),
-      query,
-    );
-
-    if (!forceFresh) {
-      TorrentIndexerProvider.searchCache.set(cacheKey, { ts: Date.now(), data: ranked });
-    }
-    return ranked;
-  }
 
   private async fetchMeilisearchResults(query: string): Promise<TorrentLike[]> {
     const url = new URL(`${this.baseUrl}/search`);
@@ -1244,16 +1196,23 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
     if (!TorrentIndexerProvider.ENABLE_FALLBACK_INDEXER_SEARCH) return [];
     if (!queries || queries.length === 0) return [];
 
-    const timeout = options?.timeoutMs ?? 8000;
+    const globalDeadlineMs = options?.timeoutMs ?? 10_000;
     const topQueries = queries.slice(0, 3);
 
-    try {
-      const indexers = await this.fetchIndexerNames();
-      if (indexers.length === 0) {
-        return [];
-      }
+    // Deadline global: garante que NUNCA ultrapassamos o timeout,
+    // mesmo com fallback cascateado (bulk → individual).
+    const deadlineTimer = new Promise<TorrentLike[]>((resolve) => {
+      setTimeout(() => {
+        logReq(context, `⏰ Mid-path deadline global de ${globalDeadlineMs}ms atingido.`);
+        resolve([]);
+      }, globalDeadlineMs);
+    });
 
-      // Calcular média de tempo e selecionar apenas indexers rápidos (média + 30% margem)
+    const doSearch = async (): Promise<TorrentLike[]> => {
+      const indexers = await this.fetchIndexerNames();
+      if (indexers.length === 0) return [];
+
+      // Selecionar indexers rápidos baseado em performance histórica
       const avgTimes = Array.from(TorrentIndexerProvider.indexerPerformance.values())
         .map(s => s.avgMs)
         .filter(ms => ms > 0);
@@ -1264,14 +1223,10 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
 
       const selected = indexers
         .filter((name) => {
-          if (this.shouldSkipIndexer(name)) {
-            return false;
-          }
+          if (this.shouldSkipIndexer(name)) return false;
           const slug = this.normalizeIndexerSlug(name);
           const perf = TorrentIndexerProvider.indexerPerformance.get(slug);
-          if (!perf || perf.avgMs === 0) {
-            return true;
-          }
+          if (!perf || perf.avgMs === 0) return true;
           return perf.avgMs <= maxAllowedMs;
         })
         .sort((a, b) => this.compareIndexerPriority(a, b))
@@ -1284,46 +1239,39 @@ export class TorrentIndexerProvider extends BaseSourceProvider {
             .sort((a, b) => this.compareIndexerPriority(a, b))
             .slice(0, 6);
 
-      if (fallbackCandidates.length === 0) {
-        return [];
-      }
+      if (fallbackCandidates.length === 0) return [];
 
       const indexersList = selected.join(',');
-      logReq(context, `🐢 Bulk-Search: Buscando [${topQueries.join(', ')}] em [${indexersList || fallbackCandidates.join(',')}] (Timeout: ${timeout}ms)`);
+      logReq(context, `🐢 Bulk-Search: [${topQueries.join(', ')}] em [${indexersList || fallbackCandidates.join(',')}] (Deadline: ${globalDeadlineMs}ms)`);
 
-      const url = new URL(`${this.baseUrl}/indexers`);
-      for (const q of topQueries) {
-        url.searchParams.append('q', q);
-      }
-      url.searchParams.set('indexers', indexersList || fallbackCandidates.join(','));
-
-      const response = await request(url.toString(), {
-        signal: AbortSignal.timeout(timeout),
-        headers: { Accept: 'application/json' },
-      });
-      if (response.statusCode < 400) {
-        const payload = await response.body.json();
-        const normalized = this.normalizeTorrentPayload(payload);
-        if (normalized.length > 0) {
-          return normalized;
+      // Tentar bulk search primeiro (endpoint /indexers/search)
+      try {
+        const url = new URL(`${this.baseUrl}/indexers/search`);
+        for (const q of topQueries) {
+          url.searchParams.append('q', q);
         }
+        url.searchParams.set('indexers', indexersList || fallbackCandidates.join(','));
+
+        const response = await request(url.toString(), {
+          signal: AbortSignal.timeout(globalDeadlineMs - 1000),
+          headers: { Accept: 'application/json' },
+        });
+        if (response.statusCode < 400) {
+          const payload = await response.body.json();
+          const normalized = this.normalizeTorrentPayload(payload);
+          if (normalized.length > 0) return normalized;
+        }
+      } catch (err) {
+        logReq(context, `⚠️ Bulk-Search falhou: ${err instanceof Error ? err.message : String(err)}`);
       }
 
-      logReq(context, `⚠️ Bulk-Search vazio/instável; usando fallback por indexer em ${fallbackCandidates.length} providers.`);
+      // Fallback: buscar por indexer individual
+      logReq(context, `↩️ Fallback por indexer em ${fallbackCandidates.length} providers.`);
       return await this.fetchSearchResultsFromCandidates(topQueries, fallbackCandidates, context);
-    } catch (err) {
-      logReq(context, `❌ Erro no bulk: ${err instanceof Error ? err.message : String(err)}`);
-      const indexers = await this.fetchIndexerNames();
-      const fallbackCandidates = indexers
-        .filter((name) => !this.shouldSkipIndexer(name))
-        .sort((a, b) => this.compareIndexerPriority(a, b))
-        .slice(0, 6);
-      if (fallbackCandidates.length === 0) {
-        return [];
-      }
-      logReq(context, `↩️ Fallback emergencial por indexer em ${fallbackCandidates.length} providers.`);
-      return await this.fetchSearchResultsFromCandidates(topQueries, fallbackCandidates, context);
-    }
+    };
+
+    // Promise.race garante que o deadline global é respeitado
+    return Promise.race([doSearch(), deadlineTimer]);
   }
 
   private async fetchSearchResultsFromCandidates(
